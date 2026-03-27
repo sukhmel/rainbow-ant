@@ -4,14 +4,15 @@ use iced::keyboard::key;
 use iced::widget::button::Style;
 use iced::widget::pane_grid::Axis;
 use iced::widget::{
-    Column, PaneGrid, Row, button, center_y, container, pane_grid, responsive, scrollable, text,
+    Column, PaneGrid, Row, button, center, center_y, container, mouse_area, opaque,
+    operation, pane_grid, responsive, scrollable, stack, text,
 };
-use iced::{
-    Background, Border, Color, Element, Font, Pixels, Settings, Subscription, futures, window,
-};
+use iced::{Background, Border, Color, Element, Font, Settings, Subscription, Theme, futures, window, Padding};
 use iced::{Event, keyboard, time};
 use iced::{Fill, Task, event, exit};
+use iced_aw::color_picker;
 use std::collections::HashMap;
+use std::iter::once;
 use std::ops::{Add, AddAssign};
 use std::time::Duration;
 
@@ -33,7 +34,7 @@ pub fn main() -> iced::Result {
     let window_settings = window::Settings {
         size: iced::Size {
             width: 1500.0,
-            height: 1362.0,
+            height: 1372.0,
         },
         // icon: Some(window::icon::from_file("www/favicon.png").unwrap()),
         resizable: true,
@@ -41,7 +42,6 @@ pub fn main() -> iced::Result {
         ..Default::default()
     };
     let settings: Settings = Settings {
-        default_text_size: Pixels(CELL_SIZE / 1.75),
         default_font: Font {
             weight: Weight::Bold,
             ..Default::default()
@@ -58,9 +58,15 @@ pub fn main() -> iced::Result {
 
 #[derive(Debug, Clone)]
 pub enum Message {
+    Blink,
     Click(usize, usize),
     Tick,
     Event(Event),
+    Resized(pane_grid::ResizeEvent),
+    ChooseColor(usize),
+    SubmitColor(Color),
+    CancelColor,
+    AddColor,
 }
 
 struct Palette {
@@ -249,6 +255,8 @@ struct State {
     palette: Palette,
     settings: AppSettings,
     panes: pane_grid::State<Pane>,
+    color_selector: Option<usize>,
+    ant_color: Color,
 }
 
 enum Pane {
@@ -270,7 +278,7 @@ impl Default for State {
         let (_settings_pane, instructions_split) = panes
             .split(Axis::Horizontal, instructions_pane, Pane::Settings)
             .unwrap();
-        panes.resize(field_split, 0.9);
+        panes.resize(field_split, 0.885);
         panes.resize(palette_split, 0.2);
         panes.resize(instructions_split, 0.8);
         Self {
@@ -280,6 +288,8 @@ impl Default for State {
             palette: Palette::default(),
             settings: AppSettings::default(),
             panes,
+            color_selector: None,
+            ant_color: Color::from_rgb(0.0, 1.0, 0.2),
         }
     }
 }
@@ -288,13 +298,13 @@ impl Default for State {
 struct AppSettings {
     paused: bool,
     steps_per_tick: usize,
-    ms_per_tick: u64,
+    ms_per_tick: usize,
 }
 
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
-            paused: false,
+            paused: true,
             steps_per_tick: 10,
             ms_per_tick: 10,
         }
@@ -330,32 +340,102 @@ impl State {
                 Pane::Instructions => "Instructions",
             };
 
-            let title_bar = pane_grid::TitleBar::new(text!("{}", title).size(24)).padding(10);
+            let title_bar = pane_grid::TitleBar::new(text!("{title}").size(24)).padding(10);
 
-            pane_grid::Content::new(responsive(move |_| match pane {
-                Pane::Field => self.view_field(),
-                Pane::Palette => text!("Palette").size(16).into(),
-                Pane::Settings => text!(
-                    "ms per draw: {}\nsteps per draw: {}\nstate: {}",
-                    self.settings.ms_per_tick,
-                    self.settings.steps_per_tick,
-                    if self.settings.paused {
-                        "paused"
-                    } else {
-                        "running"
-                    }
-                )
-                .size(16)
-                .into(),
-                Pane::Instructions => text!("Instructions").size(16).into(),
-            }))
+            pane_grid::Content::new(
+                center_y(responsive(move |_size| match pane {
+                    Pane::Field => self.view_field(),
+                    Pane::Palette => scrollable(
+                        Row::with_children(
+                            self.palette
+                                .colors
+                                .iter()
+                                .enumerate()
+                                .map(|(i, color)| {
+                                    let color_button = button(" ")
+                                        .style(|_theme, _status| Style {
+                                            background: Some(Background::Color(color.clone())),
+                                            ..Default::default()
+                                        })
+                                        .width(32.0)
+                                        .height(32.0)
+                                        .on_press(Message::ChooseColor(i));
+                                    color_button.into()
+                                })
+                                .chain(once(
+                                    button(text!("+").size(28).center())
+                                        .style(|theme: &Theme, _status| Style {
+                                            background: Some(Background::Color(
+                                                theme
+                                                    .extended_palette()
+                                                    .background
+                                                    .weak
+                                                    .color
+                                                    .into(),
+                                            )),
+                                            ..Default::default()
+                                        })
+                                        .width(32.0)
+                                        .height(32.0)
+                                        .on_press(Message::AddColor)
+                                        .into(),
+                                )),
+                        )
+
+                        .spacing(10)
+                        .padding(Padding::ZERO.right(20))
+                        .wrap(),
+                    )
+                    .direction(scrollable::Direction::Vertical(Default::default()))
+                    .into(),
+                    Pane::Settings => text!(
+                        "ms per draw: {}\nsteps per draw: {}\nstate: {}",
+                        self.settings.ms_per_tick,
+                        self.settings.steps_per_tick,
+                        if self.settings.paused {
+                            "paused"
+                        } else {
+                            "running"
+                        }
+                    )
+                    .size(16)
+                    .into(),
+                    Pane::Instructions => text!("Instructions").size(16).into(),
+                }))
+                .padding(10),
+            )
             .title_bar(title_bar)
+            .style(|theme| {
+                let palette = theme.extended_palette();
+
+                container::Style {
+                    background: Some(palette.background.weak.color.into()),
+                    border: Border {
+                        width: 2.0,
+                        color: palette.secondary.strong.color,
+                        ..Border::default()
+                    },
+                    ..Default::default()
+                }
+            })
         })
         .width(Fill)
         .height(Fill)
+        .on_resize(10, Message::Resized)
         .spacing(5);
 
-        container(pane_grid).padding(5).into()
+        if let Some(color_selector) = self.color_selector {
+            let picker = color_picker(
+                true,
+                self.palette.colors[color_selector],
+                container(text!("Choose a color")).width(100).height(100),
+                Message::CancelColor,
+                Message::SubmitColor,
+            );
+            modal(pane_grid, picker, Message::CancelColor)
+        } else {
+            container(pane_grid).padding(5).into()
+        }
     }
 
     fn view_field(&self) -> Element<'_, Message> {
@@ -367,8 +447,8 @@ impl State {
         let ant_button_style: Style = Style {
             background: Some(Background::Color(Color::TRANSPARENT)),
             border: Border {
-                color: Color::from_rgb(0.0, 1.0, 0.2),
-                width: 2.0,
+                color: self.ant_color,
+                width: 1.5,
                 radius: Default::default(),
             },
             ..Style::default()
@@ -421,15 +501,31 @@ impl State {
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Click(x, y) => {
-                self.ants.push(Ant {
-                    x,
-                    y,
-                    orientation: Direction::North,
-                    instruction: Instruction::default(),
-                });
+                if let Some((i, _)) = self
+                    .ants
+                    .iter()
+                    .enumerate()
+                    .find(|(_, ant)| ant.x == x && ant.y == y)
+                {
+                    self.ants.remove(i);
+                } else {
+                    self.ants.push(Ant {
+                        x,
+                        y,
+                        orientation: Direction::North,
+                        instruction: Instruction::default(),
+                    });
+                }
             }
             Message::Tick => {
                 self.step(self.settings.steps_per_tick);
+            }
+            Message::Blink => {
+                self.ant_color = if self.ant_color == Color::from_rgb(0.0, 1.0, 0.2) {
+                    Color::from_rgb(0.0, 0.2, 1.0)
+                } else {
+                    Color::from_rgb(0.0, 1.0, 0.2)
+                };
             }
             Message::Event(event) => match event {
                 Event::Keyboard(keyboard::Event::KeyPressed {
@@ -442,35 +538,59 @@ impl State {
                 }) => return exit(),
                 Event::Keyboard(keyboard::Event::KeyPressed {
                     key: keyboard::Key::Named(key::Named::ArrowUp),
+                    modifiers,
                     ..
                 }) => {
-                    if self.settings.steps_per_tick > 0 {
-                        self.settings.steps_per_tick *= 2;
+                    let target = if modifiers.control() {
+                        &mut self.settings.ms_per_tick
                     } else {
-                        self.settings.steps_per_tick = 1;
+                        &mut self.settings.steps_per_tick
+                    };
+                    if *target > 0 {
+                        *target *= 2;
+                    } else {
+                        *target = 1;
                     }
                 }
                 Event::Keyboard(keyboard::Event::KeyPressed {
                     key: keyboard::Key::Named(key::Named::ArrowDown),
+                    modifiers,
                     ..
                 }) => {
-                    self.settings.steps_per_tick /= 2;
+                    let target = if modifiers.control() {
+                        &mut self.settings.ms_per_tick
+                    } else {
+                        &mut self.settings.steps_per_tick
+                    };
+                    *target /= 2;
                 }
                 Event::Keyboard(keyboard::Event::KeyPressed {
                     key: keyboard::Key::Named(key::Named::ArrowLeft),
+                    modifiers,
                     ..
                 }) => {
-                    if self.settings.steps_per_tick > 10 {
-                        self.settings.steps_per_tick -= 10;
+                    let target = if modifiers.control() {
+                        &mut self.settings.ms_per_tick
                     } else {
-                        self.settings.steps_per_tick = 1;
+                        &mut self.settings.steps_per_tick
+                    };
+                    if *target > 10 {
+                        *target -= 10;
+                    } else {
+                        *target = 1;
                     }
                 }
                 Event::Keyboard(keyboard::Event::KeyPressed {
                     key: keyboard::Key::Named(key::Named::ArrowRight),
+                    modifiers,
                     ..
                 }) => {
-                    self.settings.steps_per_tick += 10;
+                    let target = if modifiers.control() {
+                        &mut self.settings.ms_per_tick
+                    } else {
+                        &mut self.settings.steps_per_tick
+                    };
+                    *target += 10;
                 }
                 Event::Keyboard(keyboard::Event::KeyPressed {
                     key: keyboard::Key::Named(key::Named::Space),
@@ -478,20 +598,80 @@ impl State {
                 }) => {
                     self.settings.paused = !self.settings.paused;
                 }
+                Event::Keyboard(keyboard::Event::KeyPressed {
+                    key: keyboard::Key::Named(key::Named::Tab),
+                    modifiers,
+                    ..
+                }) => {
+                    return if modifiers.shift() {
+                        operation::focus_previous()
+                    } else {
+                        operation::focus_next()
+                    };
+                }
                 _ => {}
             },
+            Message::Resized(pane_grid::ResizeEvent { split, ratio }) => {
+                self.panes.resize(split, ratio);
+            }
+            Message::ChooseColor(index) => {
+                self.color_selector = Some(index);
+                return operation::focus_next();
+            }
+            Message::SubmitColor(color) => {
+                if let Some(index) = self.color_selector.take() {
+                    self.palette.colors[index] = color;
+                }
+            }
+            Message::CancelColor => {
+                self.color_selector = None;
+            }
+            Message::AddColor => self.palette.colors.push(Color::from_rgb(0.5, 0.5, 0.5)),
         }
         Task::none()
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
-        let mut subscriptions = vec![event::listen().map(Message::Event)];
+        let mut subscriptions = vec![
+            event::listen().map(Message::Event),
+            time::repeat(
+                || futures::future::ready(Message::Blink),
+                Duration::from_millis(200),
+            ),
+        ];
         if !self.settings.paused && self.settings.steps_per_tick > 0 {
             subscriptions.push(time::repeat(
                 || futures::future::ready(Message::Tick),
-                Duration::from_millis(self.settings.ms_per_tick),
+                Duration::from_millis(self.settings.ms_per_tick as u64),
             ));
         }
         Subscription::batch(subscriptions)
     }
+}
+
+fn modal<'a, Message>(
+    parent: impl Into<Element<'a, Message>>,
+    content: impl Into<Element<'a, Message>>,
+    cancel: Message,
+) -> Element<'a, Message>
+where
+    Message: Clone + 'a,
+{
+    stack![
+        parent.into(),
+        opaque(mouse_area(center(text!(" "))).on_press(cancel)),
+        center(opaque(content)).style(|_theme| {
+            container::Style {
+                background: Some(
+                    Color {
+                        a: 0.8,
+                        ..Color::BLACK
+                    }
+                    .into(),
+                ),
+                ..container::Style::default()
+            }
+        })
+    ]
+    .into()
 }
