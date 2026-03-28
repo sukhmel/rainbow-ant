@@ -4,9 +4,10 @@ use iced::border::Radius;
 use iced::keyboard::key;
 use iced::widget::button::Style;
 use iced::widget::pane_grid::Axis;
+use iced::widget::text::Wrapping;
 use iced::widget::{
-    Column, PaneGrid, Row, button, center, center_y, container, mouse_area, opaque, operation,
-    pane_grid, responsive, scrollable, stack, text,
+    Button, Column, Grid, PaneGrid, Row, TextInput, button, center, center_y, container,
+    mouse_area, opaque, operation, pane_grid, responsive, scrollable, stack, text,
 };
 use iced::{Background, Border, Color, Element, Padding, Subscription, Theme, futures};
 use iced::{Event, keyboard, time};
@@ -73,6 +74,7 @@ pub struct App {
 }
 
 enum Pane {
+    Ants,
     Field,
     Palette,
     Settings,
@@ -82,18 +84,22 @@ enum Pane {
 impl Default for App {
     fn default() -> Self {
         let (mut panes, field_pane) = pane_grid::State::new(Pane::Field);
-        let (palette_pane, field_split) = panes
+        let (palette_pane, field_vs_right_split) = panes
             .split(Axis::Vertical, field_pane, Pane::Palette)
             .unwrap();
-        let (instructions_pane, palette_split) = panes
+        let (instructions_pane, palette_vs_instruction_split) = panes
             .split(Axis::Horizontal, palette_pane, Pane::Instructions)
             .unwrap();
-        let (_settings_pane, instructions_split) = panes
-            .split(Axis::Horizontal, instructions_pane, Pane::Settings)
+        let (ants_pane, instructions_vs_ants_split) = panes
+            .split(Axis::Horizontal, instructions_pane, Pane::Ants)
             .unwrap();
-        panes.resize(field_split, 0.885);
-        panes.resize(palette_split, 0.2);
-        panes.resize(instructions_split, 0.8);
+        let (_settings_pane, ants_vs_settings_split) = panes
+            .split(Axis::Horizontal, ants_pane, Pane::Settings)
+            .unwrap();
+        panes.resize(field_vs_right_split, 0.885);
+        panes.resize(palette_vs_instruction_split, 0.2);
+        panes.resize(instructions_vs_ants_split, 0.4);
+        panes.resize(ants_vs_settings_split, 0.75);
         Self {
             state: State::default(),
             palette: Palette::default(),
@@ -133,6 +139,7 @@ impl App {
     pub fn view(&self) -> Element<'_, Message> {
         let pane_grid = PaneGrid::new(&self.panes, |_id, pane, _is_maximized| {
             let title = match pane {
+                Pane::Ants => "Ants",
                 Pane::Field => "Field",
                 Pane::Palette => "Palette",
                 Pane::Settings => "Settings",
@@ -143,63 +150,11 @@ impl App {
 
             pane_grid::Content::new(
                 center_y(responsive(move |_size| match pane {
+                    Pane::Ants => self.view_ants(),
                     Pane::Field => self.view_field(),
-                    Pane::Palette => scrollable(
-                        Row::with_children(
-                            self.palette
-                                .colors
-                                .iter()
-                                .enumerate()
-                                .map(|(i, color)| {
-                                    let color_button = button(" ")
-                                        .style(|_theme, _status| Style {
-                                            background: Some(Background::Color(color.clone())),
-                                            ..Default::default()
-                                        })
-                                        .width(32.0)
-                                        .height(32.0)
-                                        .on_press(Message::ChooseColor(i));
-                                    color_button.into()
-                                })
-                                .chain(once(
-                                    button(text!("+").size(28).center())
-                                        .style(|theme: &Theme, _status| Style {
-                                            background: Some(Background::Color(
-                                                theme
-                                                    .extended_palette()
-                                                    .background
-                                                    .weak
-                                                    .color
-                                                    .into(),
-                                            )),
-                                            ..Default::default()
-                                        })
-                                        .width(32.0)
-                                        .height(32.0)
-                                        .on_press(Message::AddColor)
-                                        .into(),
-                                )),
-                        )
-                        .spacing(10)
-                        .padding(Padding::ZERO.right(20))
-                        .wrap(),
-                    )
-                    .direction(scrollable::Direction::Vertical(Default::default()))
-                    .into(),
-                    Pane::Settings => text!(
-                        "ms per draw: {}\nsteps per draw: {}\nstate: {}\nsteps: {}",
-                        self.settings.ms_per_tick,
-                        self.settings.steps_per_tick,
-                        if self.settings.paused {
-                            "paused"
-                        } else {
-                            "running"
-                        },
-                        self.state.generation(),
-                    )
-                    .size(16)
-                    .into(),
-                    Pane::Instructions => text!("Instructions").size(16).into(),
+                    Pane::Palette => self.view_palette(),
+                    Pane::Settings => self.view_settings(),
+                    Pane::Instructions => self.view_instructions(),
                 }))
                 .padding(10),
             )
@@ -235,6 +190,40 @@ impl App {
         } else {
             container(pane_grid).padding(5).into()
         }
+    }
+
+    fn view_ants(&self) -> Element<'_, Message> {
+        scrollable(
+            Row::with_children(self.state.ants.iter().map(|ant| {
+                Grid::from_vec(vec![
+                    center_y(text!("x")).into(),
+                    TextInput::new("x", &ant.start_position.x.to_string())
+                        .width(50)
+                        .into(),
+                    center_y(text!("y")).into(),
+                    TextInput::new("y", &ant.start_position.y.to_string())
+                        .width(50)
+                        .into(),
+                    center_y(text!("start")).into(),
+                    Button::new(
+                        text!("{}", ant.start_position.orientation)
+                            .size(16)
+                            .center(),
+                    )
+                    .into(),
+                    center_y(text!("moves")).into(),
+                    Button::new(text!("{}", ant.instruction).size(16).center()).into(),
+                ])
+                .columns(2)
+                .height(128.0)
+                .into()
+            }))
+            .padding(Padding::ZERO.right(20))
+            .spacing(10)
+            .wrap(),
+        )
+        .direction(scrollable::Direction::Vertical(Default::default()))
+        .into()
     }
 
     fn view_field(&self) -> Element<'_, Message> {
@@ -298,17 +287,92 @@ impl App {
         .into()
     }
 
+    fn view_palette(&self) -> Element<'_, Message> {
+        scrollable(
+            Row::with_children(
+                self.palette
+                    .colors
+                    .iter()
+                    .enumerate()
+                    .map(|(i, color)| {
+                        let color_button = button(" ")
+                            .style(|_theme, _status| Style {
+                                background: Some(Background::Color(color.clone())),
+                                ..Default::default()
+                            })
+                            .width(32.0)
+                            .height(32.0)
+                            .on_press(Message::ChooseColor(i));
+                        color_button.into()
+                    })
+                    .chain(once(
+                        button(text!("+").size(28).center())
+                            .style(|theme: &Theme, _status| Style {
+                                background: Some(Background::Color(
+                                    theme.extended_palette().background.weak.color.into(),
+                                )),
+                                ..Default::default()
+                            })
+                            .width(32.0)
+                            .height(32.0)
+                            .on_press(Message::AddColor)
+                            .into(),
+                    )),
+            )
+            .spacing(10)
+            .padding(Padding::ZERO.right(20))
+            .wrap(),
+        )
+        .direction(scrollable::Direction::Vertical(Default::default()))
+        .into()
+    }
+
+    fn view_settings(&self) -> Element<'_, Message> {
+        scrollable(
+            text!(
+                "ms per draw: {}\nsteps per draw: {}\nstate: {}\nsteps: {}",
+                self.settings.ms_per_tick,
+                self.settings.steps_per_tick,
+                if self.settings.paused {
+                    "paused"
+                } else {
+                    "running"
+                },
+                self.state.generation(),
+            )
+            .size(16),
+        )
+        .direction(scrollable::Direction::Vertical(Default::default()))
+        .into()
+    }
+
+    fn view_instructions(&self) -> Element<'_, Message> {
+        scrollable(
+            text!("TODO: move set goes here")
+                .wrapping(Wrapping::Word)
+                .size(16),
+        )
+        .direction(scrollable::Direction::Vertical(Default::default()))
+        .into()
+    }
+
     pub fn update(&mut self, message: Message) -> Task<Message> {
-        if matches!(message, Message::Event(Event::Keyboard(keyboard::Event::KeyPressed {
-                                key: keyboard::Key::Named(key::Named::Control),
-                                ..
-                            }))) {
+        if matches!(
+            message,
+            Message::Event(Event::Keyboard(keyboard::Event::KeyPressed {
+                key: keyboard::Key::Named(key::Named::Control),
+                ..
+            }))
+        ) {
             self.ctrl_pressed = true;
         }
-        if matches!(message, Message::Event(Event::Keyboard(keyboard::Event::KeyReleased {
-                                key: keyboard::Key::Named(key::Named::Control),
-                                ..
-                            }))) {
+        if matches!(
+            message,
+            Message::Event(Event::Keyboard(keyboard::Event::KeyReleased {
+                key: keyboard::Key::Named(key::Named::Control),
+                ..
+            }))
+        ) {
             self.ctrl_pressed = false;
         }
 

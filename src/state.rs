@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt::{Display, Formatter};
 use std::ops::{Add, AddAssign};
 
 pub const CELL_COUNT: usize = 256;
@@ -53,7 +54,7 @@ impl Default for Field {
 ///  \./_ _\./_ _\ /
 /// ```
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum Direction {
+pub enum Direction {
     North = 0,
     NorthEast = 1,
     East = 2,
@@ -62,6 +63,21 @@ enum Direction {
     SouthWest = 5,
     West = 6,
     NorthWest = 7,
+}
+
+impl Display for Direction {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Direction::North => f.write_str("↑"),
+            Direction::NorthEast => f.write_str("↗"),
+            Direction::East => f.write_str("→"),
+            Direction::SouthEast => f.write_str("↘"),
+            Direction::South => f.write_str("↓"),
+            Direction::SouthWest => f.write_str("↙"),
+            Direction::West => f.write_str("←"),
+            Direction::NorthWest => f.write_str("↖"),
+        }
+    }
 }
 
 impl Add for Direction {
@@ -122,17 +138,17 @@ impl Default for Instruction {
 }
 
 #[derive(Clone, Debug)]
-struct Position {
-    x: usize,
-    y: usize,
-    orientation: Direction,
+pub struct Position {
+    pub x: usize,
+    pub y: usize,
+    pub orientation: Direction,
 }
 
 #[derive(Clone, Debug)]
-struct Ant {
+pub struct Ant {
+    pub start_position: Position,
+    pub instruction: usize,
     position: Position,
-    start_position: Position,
-    instruction: usize,
 }
 
 impl Ant {
@@ -188,7 +204,7 @@ impl Default for Ant {
 
 pub struct State {
     generation: usize,
-    ants: Vec<Ant>,
+    pub ants: Vec<Ant>,
     field: Field,
     instructions: Vec<Instruction>,
 }
@@ -242,7 +258,11 @@ impl State {
     pub fn add_ant(&mut self, x: usize, y: usize, instruction: usize) {
         let x = x % CELL_COUNT;
         let y = y % CELL_COUNT;
-        if self.ants.iter().any(|ant| ant.start_position.x == x && ant.start_position.y == y) {
+        if self
+            .ants
+            .iter()
+            .any(|ant| ant.start_position.x == x && ant.start_position.y == y)
+        {
             return;
         }
         let position = Position {
