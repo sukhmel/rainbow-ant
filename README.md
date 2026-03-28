@@ -22,3 +22,6 @@ TODO:
 - [ ] Support for triangular grid
   - [ ] display grid
   - [ ] move set
+- [ ] Save/load configuration
+- [ ] Save/load state
+- [ ] Undo/redo

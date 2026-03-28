@@ -6,3 +6,6 @@ edition = "2024"
 [dependencies]
 iced = { version = "0.14", features = ["tokio"] }
 iced_aw = { version = "0.13.0", features = ["full"] }
+
+# [profile.release]
+# lto = "fat"
