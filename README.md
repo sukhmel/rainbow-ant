@@ -10,9 +10,11 @@ Basic ant is implemented, some UI is there.
 
 TODO:
 - [x] Display instructions
-- [ ] Edit instructions
+- [x] Edit instructions
 - [ ] Highlight the ant in ant pane on hover
-- [ ] Edit ant settings
+- [x] Edit ant settings
+  - [ ] Reorder ants
+  - [ ] Remove ants using the ants pane
 - [ ] Visual direction picker
 - [ ] Zoom in/out ([viewport](https://docs.rs/iced_glow/latest/iced_glow/struct.Viewport.html) 
     with [canvas](https://docs.rs/iced/latest/iced/widget/canvas/index.html)?)
@@ -25,3 +27,4 @@ TODO:
 - [ ] Save/load configuration
 - [ ] Save/load state
 - [ ] Undo/redo
+- [ ] Set a specific step number
