@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::fmt::{Display, Formatter};
 use std::ops::{Add, AddAssign};
 
@@ -113,9 +113,9 @@ impl From<u8> for Direction {
 }
 
 #[derive(Clone, Debug)]
-struct Instruction {
+pub struct Instruction {
     /// Map from current palette index to next palette index and direction
-    map: HashMap<u8, (u8, Option<Direction>)>,
+    pub map: BTreeMap<u8, (u8, Option<Direction>)>,
 }
 
 impl Default for Instruction {
@@ -206,7 +206,7 @@ pub struct State {
     generation: usize,
     pub ants: Vec<Ant>,
     field: Field,
-    instructions: Vec<Instruction>,
+    pub instructions: Vec<Instruction>,
 }
 
 impl Default for State {

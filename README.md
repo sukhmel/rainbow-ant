@@ -9,7 +9,7 @@ Written in ~~C++ using Qt~~ Rust with [iced](https://github.com/iced-rs/iced/tre
 Basic ant is implemented, some UI is there.
 
 TODO:
-- [ ] Display instructions
+- [x] Display instructions
 - [ ] Edit instructions
 - [ ] Highlight the ant in ant pane on hover
 - [ ] Edit ant settings

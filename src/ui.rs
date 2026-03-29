@@ -1,13 +1,12 @@
-use crate::state::CELL_COUNT;
 use crate::state::State;
+use crate::state::{CELL_COUNT, Direction, Instruction};
 use iced::border::Radius;
 use iced::keyboard::key;
 use iced::widget::button::Style;
 use iced::widget::pane_grid::Axis;
-use iced::widget::text::Wrapping;
 use iced::widget::{
-    Button, Column, Grid, PaneGrid, Row, TextInput, button, center, center_y, container,
-    mouse_area, opaque, operation, pane_grid, responsive, scrollable, stack, text,
+    Column, Grid, PaneGrid, Row, TextInput, button, center, center_y, container, mouse_area,
+    opaque, operation, pane_grid, responsive, scrollable, stack, text,
 };
 use iced::{Background, Border, Color, Element, Padding, Subscription, Theme, futures};
 use iced::{Event, keyboard, time};
@@ -40,6 +39,8 @@ pub enum Message {
     SubmitColor(Color),
     CancelColor,
     AddColor,
+    AddInstruction,
+    AppendInstruction(usize),
 }
 
 struct Palette {
@@ -193,37 +194,41 @@ impl App {
     }
 
     fn view_ants(&self) -> Element<'_, Message> {
-        scrollable(
-            Row::with_children(self.state.ants.iter().map(|ant| {
-                Grid::from_vec(vec![
-                    center_y(text!("x")).into(),
-                    TextInput::new("x", &ant.start_position.x.to_string())
-                        .width(50)
-                        .into(),
-                    center_y(text!("y")).into(),
-                    TextInput::new("y", &ant.start_position.y.to_string())
-                        .width(50)
-                        .into(),
-                    center_y(text!("start")).into(),
-                    Button::new(
-                        text!("{}", ant.start_position.orientation)
-                            .size(16)
-                            .center(),
-                    )
-                    .into(),
-                    center_y(text!("moves")).into(),
-                    Button::new(text!("{}", ant.instruction).size(16).center()).into(),
-                ])
-                .columns(2)
-                .height(128.0)
+        responsive(move |size| {
+            scrollable(
+                Row::with_children(self.state.ants.iter().map(|ant| {
+                    Grid::from_vec(vec![
+                        center_y(text!("x")).into(),
+                        TextInput::new("x", &ant.start_position.x.to_string())
+                            .width(50)
+                            .into(),
+                        center_y(text!("y")).into(),
+                        TextInput::new("y", &ant.start_position.y.to_string())
+                            .width(50)
+                            .into(),
+                        center_y(text!("start")).into(),
+                        button(
+                            text!("{}", ant.start_position.orientation)
+                                .size(16)
+                                .center(),
+                        )
+                            .into(),
+                        center_y(text!("moves")).into(),
+                        button(text!("{}", ant.instruction).size(16).center()).into(),
+                    ])
+                        .columns(2)
+                        .height(128.0)
+                        .into()
+                }))
+                    .padding(Padding::ZERO.right(20))
+                    .spacing(10)
+                    .wrap(),
+            )
+                .height(size.height)
+                .width(size.width)
+                .direction(scrollable::Direction::Vertical(Default::default()))
                 .into()
-            }))
-            .padding(Padding::ZERO.right(20))
-            .spacing(10)
-            .wrap(),
-        )
-        .direction(scrollable::Direction::Vertical(Default::default()))
-        .into()
+        }).into()
     }
 
     fn view_field(&self) -> Element<'_, Message> {
@@ -253,7 +258,6 @@ impl App {
                         .on_press(Message::Click(x, y))
                         .width(CELL_SIZE)
                         .height(CELL_SIZE)
-                        // .padding([5, 16])
                         .style(move |_, _status| {
                             let color = self.palette.colors
                                 [self.state.field_at(x, y) % self.palette.colors.len()];
@@ -288,42 +292,47 @@ impl App {
     }
 
     fn view_palette(&self) -> Element<'_, Message> {
-        scrollable(
-            Row::with_children(
-                self.palette
-                    .colors
-                    .iter()
-                    .enumerate()
-                    .map(|(i, color)| {
-                        let color_button = button(" ")
-                            .style(|_theme, _status| Style {
-                                background: Some(Background::Color(color.clone())),
-                                ..Default::default()
-                            })
-                            .width(32.0)
-                            .height(32.0)
-                            .on_press(Message::ChooseColor(i));
-                        color_button.into()
-                    })
-                    .chain(once(
-                        button(text!("+").size(28).center())
-                            .style(|theme: &Theme, _status| Style {
-                                background: Some(Background::Color(
-                                    theme.extended_palette().background.weak.color.into(),
-                                )),
-                                ..Default::default()
-                            })
-                            .width(32.0)
-                            .height(32.0)
-                            .on_press(Message::AddColor)
-                            .into(),
-                    )),
+        responsive(move |size| {
+            scrollable(
+                Row::with_children(
+                    self.palette
+                        .colors
+                        .iter()
+                        .enumerate()
+                        .map(|(i, color)| {
+                            button(" ")
+                                .style(|_theme, _status| Style {
+                                    background: Some(Background::Color(color.clone())),
+                                    ..Default::default()
+                                })
+                                .width(32.0)
+                                .height(32.0)
+                                .on_press(Message::ChooseColor(i))
+                                .into()
+                        })
+                        .chain(once(
+                            button(text!("+").size(28).center())
+                                .style(|theme: &Theme, _status| Style {
+                                    background: Some(Background::Color(
+                                        theme.extended_palette().background.weak.color.into(),
+                                    )),
+                                    ..Default::default()
+                                })
+                                .width(32.0)
+                                .height(32.0)
+                                .on_press(Message::AddColor)
+                                .into(),
+                        )),
+                )
+                .spacing(10)
+                .padding(Padding::ZERO.right(20))
+                .wrap(),
             )
-            .spacing(10)
-            .padding(Padding::ZERO.right(20))
-            .wrap(),
-        )
-        .direction(scrollable::Direction::Vertical(Default::default()))
+            .height(size.height)
+            .width(size.width)
+            .direction(scrollable::Direction::Vertical(Default::default()))
+            .into()
+        })
         .into()
     }
 
@@ -347,12 +356,109 @@ impl App {
     }
 
     fn view_instructions(&self) -> Element<'_, Message> {
-        scrollable(
-            text!("TODO: move set goes here")
-                .wrapping(Wrapping::Word)
-                .size(16),
-        )
-        .direction(scrollable::Direction::Vertical(Default::default()))
+        responsive(move |size| {
+            scrollable(
+                Row::with_children(
+                    self.state
+                        .instructions
+                        .iter()
+                        .enumerate()
+                        .flat_map(|(index, instruction)| {
+                            let children = instruction
+                                .map
+                                .iter()
+                                .flat_map(|(from, (to, direction))| {
+                                    [
+                                        button(" ")
+                                            .style(|_theme, _status| Style {
+                                                background: Some(Background::Color(
+                                                    self.palette.colors[*from as usize].clone(),
+                                                )),
+                                                ..Default::default()
+                                            })
+                                            .width(32.0)
+                                            .height(32.0)
+                                            .into(),
+                                        button(" ")
+                                            .style(|_theme, _status| Style {
+                                                background: Some(Background::Color(
+                                                    self.palette.colors[*to as usize].clone(),
+                                                )),
+                                                ..Default::default()
+                                            })
+                                            .width(32.0)
+                                            .height(32.0)
+                                            // .on_press(Message::ChooseColor(i))
+                                            .into(),
+                                        button(
+                                            text!(
+                                                "{}",
+                                                direction
+                                                    .map(|d| d.to_string())
+                                                    .unwrap_or(String::from("・"))
+                                            )
+                                            .size(16)
+                                            .center(),
+                                        )
+                                        .into(),
+                                    ]
+                                    .into_iter()
+                                })
+                                .chain((instruction.map.len() < self.palette.colors.len()).then(
+                                    || {
+                                        button(text!("+").size(28).center())
+                                            .style(|theme: &Theme, _status| Style {
+                                                background: Some(Background::Color(
+                                                    theme
+                                                        .extended_palette()
+                                                        .background
+                                                        .weak
+                                                        .color
+                                                        .into(),
+                                                )),
+                                                ..Default::default()
+                                            })
+                                            .width(32.0)
+                                            .height(32.0)
+                                            .on_press(Message::AppendInstruction(index))
+                                            .into()
+                                    },
+                                ));
+                            [
+                                Grid::with_children(children)
+                                    .columns(3)
+                                    .spacing(5)
+                                    .width(80.0)
+                                    .into(),
+                                iced::widget::rule::vertical(3.).into(),
+                            ]
+                            .into_iter()
+                        })
+                        .chain(once(
+                            button(text!("+").size(28).center())
+                                .style(|theme: &Theme, _status| Style {
+                                    background: Some(Background::Color(
+                                        theme.extended_palette().background.weak.color.into(),
+                                    )),
+                                    ..Default::default()
+                                })
+                                .width(20.0)
+                                .height(20.0)
+                                .on_press(Message::AddInstruction)
+                                .into(),
+                        )),
+                )
+                .padding(Padding::ZERO.right(20).bottom(20))
+                .spacing(10),
+            )
+            .height(size.height)
+            .width(size.width)
+            .direction(scrollable::Direction::Both {
+                vertical: Default::default(),
+                horizontal: Default::default(),
+            })
+            .into()
+        })
         .into()
     }
 
@@ -501,6 +607,25 @@ impl App {
                 self.color_selector = None;
             }
             Message::AddColor => self.palette.colors.push(Color::from_rgb(0.5, 0.5, 0.5)),
+            Message::AddInstruction => {
+                self.state.instructions.push(Instruction {
+                    map: [
+                        (0, (1, Some(Direction::West))),
+                        (1, (0, Some(Direction::East))),
+                    ]
+                    .into_iter()
+                    .collect(),
+                });
+            }
+            Message::AppendInstruction(index) => {
+                if let Some(instruction) = self.state.instructions.get_mut(index) {
+                    if let Some(color) = (0..self.palette.colors.len() as u8)
+                        .find(|c| !instruction.map.contains_key(c))
+                    {
+                        self.state.instructions[index].map.insert(color, (0, None));
+                    }
+                }
+            }
         }
         Task::none()
     }
