@@ -5,8 +5,9 @@ use iced::keyboard::key;
 use iced::widget::button::Style;
 use iced::widget::pane_grid::Axis;
 use iced::widget::{
-    Column, Grid, PaneGrid, Row, TextInput, button, center, center_y, container, mouse_area,
-    opaque, operation, pane_grid, responsive, scrollable, stack, text, tooltip,
+    Column, Grid, PaneGrid, Row, TextInput, button, center, center_y, column, container,
+    mouse_area, opaque, operation, pane_grid, responsive, row, scrollable, space, stack, text,
+    tooltip,
 };
 use iced::{Background, Border, Color, Element, Padding, Subscription, Theme, futures};
 use iced::{Event, keyboard, time};
@@ -17,7 +18,6 @@ use std::iter::once;
 use std::time::Duration;
 
 pub const CELL_SIZE: f32 = 5.0;
-pub const FIELD_SIZE: f32 = CELL_SIZE * (CELL_COUNT as f32);
 const DEFAULT_BORDER: Border = Border {
     color: Color::from_rgb(0.6, 0.6, 0.6),
     width: 0.1,
@@ -31,9 +31,12 @@ const DEFAULT_BORDER: Border = Border {
 
 #[derive(Debug, Clone)]
 pub enum Message {
+    RequestStep(usize),
+    ApplyStep,
     Blink,
     Click(usize, usize),
     Tick,
+    SkipForward,
     Event(Event),
     Resized(pane_grid::ResizeEvent),
     ChooseColor(usize),
@@ -55,6 +58,7 @@ pub enum Message {
         instruction_index: usize,
         palette_index: u8,
     },
+    Pause,
 }
 
 struct Palette {
@@ -86,6 +90,7 @@ pub struct App {
     color_selector: Option<usize>,
     ant_color: Color,
     ctrl_pressed: bool,
+    step_requested: Option<usize>,
 }
 
 enum Pane {
@@ -123,6 +128,7 @@ impl Default for App {
             color_selector: None,
             ant_color: Color::from_rgb(0.0, 1.0, 0.2),
             ctrl_pressed: false,
+            step_requested: None,
         }
     }
 }
@@ -248,7 +254,7 @@ impl App {
                         )
                         .on_press(Message::RotateAnt(ant_index))
                         .into(),
-                        center_y(text!("moves")).into(),
+                        center_y(text!("rules")).into(),
                         if self.state.instructions.len() > 1 {
                             NumberInput::new(
                                 &ant.instruction,
@@ -295,53 +301,63 @@ impl App {
             },
             ..Style::default()
         };
+        let (x_max, y_max) = self.state.field_size();
+        responsive(move |size| {
+            center_y(
+                scrollable(
+                    Column::with_children((0..y_max).flat_map(|y| {
+                        let mut children = vec![];
 
-        let field = Column::with_children((0..CELL_COUNT).flat_map(|y| {
-            let mut children = vec![];
+                        let row =
+                            Element::from(Row::with_children((0..x_max).flat_map(move |x| {
+                                let mut children = vec![];
 
-            let row = Element::from(Row::with_children((0..CELL_COUNT).flat_map(move |x| {
-                let mut children = vec![];
+                                children.push(
+                                    tooltip(
+                                        button("")
+                                            .on_press(Message::Click(x, y))
+                                            .width(CELL_SIZE)
+                                            .height(CELL_SIZE)
+                                            .style(move |_, _status| {
+                                                let color =
+                                                    self.palette.colors[self.state.field_at(x, y)
+                                                        % self.palette.colors.len()];
+                                                // TODO: optimize this
+                                                let style = if self.state.is_ant(x, y) {
+                                                    ant_button_style
+                                                } else {
+                                                    default_button_style
+                                                };
+                                                Style {
+                                                    background: Some(Background::Color(
+                                                        color.clone(),
+                                                    )),
+                                                    ..style
+                                                }
+                                            }),
+                                        text!("({}, {})", x, y),
+                                        tooltip::Position::FollowCursor,
+                                    )
+                                    .into(),
+                                );
 
-                children.push(
-                    tooltip(
-                        button("")
-                            .on_press(Message::Click(x, y))
-                            .width(CELL_SIZE)
-                            .height(CELL_SIZE)
-                            .style(move |_, _status| {
-                                let color = self.palette.colors
-                                    [self.state.field_at(x, y) % self.palette.colors.len()];
-                                // TODO: optimize this
-                                let style = if self.state.is_ant(x, y) {
-                                    ant_button_style
-                                } else {
-                                    default_button_style
-                                };
-                                Style {
-                                    background: Some(Background::Color(color.clone())),
-                                    ..style
-                                }
-                            }),
-                        text!("({}, {})", x, y),
-                        tooltip::Position::FollowCursor,
-                    )
-                    .into(),
-                );
+                                children.into_iter()
+                            })));
+                        children.push(row);
 
-                children.into_iter()
-            })));
-            children.push(row);
-
-            children.into_iter()
-        }))
-        .width(FIELD_SIZE)
-        .height(FIELD_SIZE);
-
-        center_y(scrollable(field).direction(scrollable::Direction::Both {
-            vertical: Default::default(),
-            horizontal: Default::default(),
-        }))
-        .padding(5)
+                        children.into_iter()
+                    }))
+                    .padding(Padding::ZERO.right(10).bottom(10)),
+                )
+                .width(size.width)
+                .height(size.height)
+                .direction(scrollable::Direction::Both {
+                    vertical: Default::default(),
+                    horizontal: Default::default(),
+                }),
+            )
+            .into()
+        })
         .into()
     }
 
@@ -391,21 +407,52 @@ impl App {
     }
 
     fn view_settings(&self) -> Element<'_, Message> {
-        scrollable(
-            text!(
-                "ms per draw: {}\nsteps per draw: {}\nstate: {}\nsteps: {}",
-                self.settings.ms_per_tick,
-                self.settings.steps_per_tick,
-                if self.settings.paused {
-                    "paused"
-                } else {
-                    "running"
-                },
-                self.state.generation(),
+        let generation = self
+            .step_requested
+            .unwrap_or_else(|| self.state.generation());
+
+        responsive(move |size| {
+            scrollable(
+                column([
+                    text!(
+                        "ms per draw: {}\nsteps per draw: {}",
+                        self.settings.ms_per_tick,
+                        self.settings.steps_per_tick,
+                    )
+                    .size(16)
+                    .into(),
+                    row([
+                        center_y(text!("state").size(16)).into(),
+                        space().width(10).into(),
+                        button(text!("{}", if self.settings.paused { "⏸" } else { "▶" }))
+                            .on_press(Message::Pause)
+                            .into(),
+                        space().width(10).into(),
+                        button(text!("{}", "⏩︎")).on_press(Message::Tick).into(),
+                        space().width(10).into(),
+                        button(text!("{}", "⏭︎"))
+                            .on_press(Message::SkipForward)
+                            .into(),
+                    ])
+                    .into(),
+                    row([
+                        center_y(text!("steps").size(16)).into(),
+                        space().width(10).into(),
+                        NumberInput::new(&generation, 0.., Message::RequestStep).into(),
+                        button(text!("go")).on_press(Message::ApplyStep).into(),
+                    ])
+                    .into(),
+                ])
+                .padding(Padding::ZERO.bottom(20)),
             )
-            .size(16),
-        )
-        .direction(scrollable::Direction::Vertical(Default::default()))
+            .height(size.height)
+            .width(size.width)
+            .direction(scrollable::Direction::Both {
+                vertical: Default::default(),
+                horizontal: Default::default(),
+            })
+            .into()
+        })
         .into()
     }
 
@@ -435,7 +482,17 @@ impl App {
                                             ..Default::default()
                                         })
                                         .into(),
-                                    text!(">").size(16).center().into(),
+                                    text!(
+                                        "{}",
+                                        if instruction.map.iter().any(|(_, (to, _))| to == from) {
+                                            ">"
+                                        } else {
+                                            "!"
+                                        }
+                                    )
+                                    .size(16)
+                                    .center()
+                                    .into(),
                                     button(" ")
                                         .style(|_theme, _status| Style {
                                             background: Some(Background::Color(
@@ -542,6 +599,9 @@ impl App {
                 } else {
                     Color::from_rgb(0.0, 1.0, 0.2)
                 };
+            }
+            Message::Pause => {
+                self.settings.paused = !self.settings.paused;
             }
             Message::Event(event) => match event {
                 Event::Keyboard(keyboard::Event::KeyPressed {
@@ -740,6 +800,18 @@ impl App {
 
                     self.state.recalculate();
                 }
+            }
+            Message::RequestStep(step) => {
+                self.step_requested = Some(step);
+            }
+            Message::ApplyStep => {
+                if let Some(step) = self.step_requested.take() {
+                    self.state.go_to_step(step);
+                }
+            }
+            Message::SkipForward => {
+                self.state
+                    .go_to_step((self.state.generation() / 100_000 + 1) * 100_000);
             }
         }
         Task::none()

@@ -27,4 +27,4 @@ TODO:
 - [ ] Save/load configuration
 - [ ] Save/load state
 - [ ] Undo/redo
-- [ ] Set a specific step number
+- [x] Set a specific step number

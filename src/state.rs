@@ -202,7 +202,9 @@ impl Default for Ant {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct State {
+    snapshots: BTreeMap<usize, State>,
     generation: usize,
     pub ants: Vec<Ant>,
     field: Field,
@@ -212,6 +214,7 @@ pub struct State {
 impl Default for State {
     fn default() -> Self {
         Self {
+            snapshots: Default::default(),
             generation: 0,
             ants: vec![Ant::default()],
             field: Field::default(),
@@ -227,9 +230,33 @@ impl State {
         result
     }
 
+    pub fn go_to_step(&mut self, step: usize) {
+        if let Some(diff) = step.checked_sub(self.generation) {
+            self.step(diff);
+        } else if let Some((record, snapshot)) =
+            self.snapshots.iter().filter(|(a, _)| **a < step).last()
+        {
+            self.generation = *record;
+            self.field = snapshot.field.clone();
+            self.ants = snapshot.ants.clone();
+            self.instructions = snapshot.instructions.clone();
+            self.snapshots.retain(|a, _| *a < step);
+            self.step(step - self.generation);
+        }
+    }
+
     pub fn step(&mut self, count: usize) {
-        self.generation += count;
         for _ in 0..count {
+            if self.generation % 100_000 == 0 {
+                self.snapshots.insert(
+                    self.generation,
+                    State {
+                        snapshots: Default::default(),
+                        ..self.clone()
+                    },
+                );
+            }
+            self.generation += 1;
             for ant in &mut self.ants {
                 let next = &self.instructions[ant.instruction].map
                     [&self.field.values[ant.position.x][ant.position.y]];
@@ -245,6 +272,10 @@ impl State {
         self.ants
             .iter()
             .any(|ant| ant.position.x == x && ant.position.y == y)
+    }
+
+    pub fn field_size(&self) -> (usize, usize) {
+        (self.field.values.len(), self.field.values[0].len())
     }
 
     pub fn field_at(&self, x: usize, y: usize) -> usize {
