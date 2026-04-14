@@ -1,33 +1,26 @@
-use crate::state::{Direction, Instruction, MAX_CELL_COUNT};
+use crate::state::{DEFAULT_SIZE, Direction, Instruction, MAX_CELL_COUNT};
 use crate::state::{Position, State};
-use iced::border::Radius;
+use crate::ui::button::Style;
+use iced::alignment::Vertical;
 use iced::keyboard::key;
-use iced::widget::button::Style;
+use iced::mouse::Cursor;
+use iced::widget::canvas::{Geometry, Stroke};
 use iced::widget::pane_grid::Axis;
+use iced::widget::text::{Alignment, LineHeight};
 use iced::widget::{
-    Column, Grid, PaneGrid, Row, TextInput, button, center, center_y, column, container,
+    Action, Grid, PaneGrid, Row, TextInput, button, canvas, center, center_y, column, container,
     mouse_area, opaque, operation, pane_grid, responsive, row, scrollable, space, stack, text,
-    tooltip,
 };
-use iced::{Background, Border, Color, Element, Padding, Subscription, Theme, futures};
+use iced::{
+    Background, Border, Color, Element, Padding, Pixels, Point, Rectangle, Renderer, Size,
+    Subscription, Theme, futures,
+};
 use iced::{Event, keyboard, time};
 use iced::{Fill, Task, event, exit};
 use iced_aw::{NumberInput, color_picker};
 use std::collections::BTreeMap;
 use std::iter::once;
-use std::time::Duration;
-
-pub const CELL_SIZE: f32 = 5.0;
-const DEFAULT_BORDER: Border = Border {
-    color: Color::from_rgb(0.6, 0.6, 0.6),
-    width: 0.1,
-    radius: Radius {
-        top_left: 0.0,
-        top_right: 0.0,
-        bottom_right: 0.0,
-        bottom_left: 0.0,
-    },
-};
+use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -37,7 +30,7 @@ pub enum Message {
     ApplyStep,
     ApplySize,
     Blink,
-    Click(usize, usize),
+    Click(usize, usize, bool),
     Tick,
     SkipForward,
     Event(Event),
@@ -95,6 +88,100 @@ pub struct App {
     ctrl_pressed: bool,
     step_requested: Option<usize>,
     size_requested: Option<(usize, usize)>,
+    scale: f32,
+    last_tick: Option<Instant>,
+    last_tick_duration: Option<Duration>,
+}
+
+impl canvas::Program<Message> for App {
+    type State = ();
+
+    fn update(
+        &self,
+        _state: &mut Self::State,
+        event: &Event,
+        bounds: Rectangle,
+        cursor: Cursor,
+    ) -> Option<Action<Message>> {
+        let Event::Mouse(iced::mouse::Event::ButtonReleased(button)) = event else {
+            return None;
+        };
+
+        let scale = self.scale;
+        let (width, height) = self.state.field_size();
+        let Some(point) = cursor.position_in(bounds) else {
+            return None;
+        };
+
+        let (x, y) = ((point.x / scale) as usize, (point.y / scale) as usize);
+
+        if x <= width && y <= height {
+            if *button == iced::mouse::Button::Left {
+                return Some(Action::publish(Message::Click(x, y, true).into()));
+            } else if *button == iced::mouse::Button::Right {
+                return Some(Action::publish(Message::Click(x, y, false).into()));
+            }
+        }
+        None
+    }
+
+    fn draw(
+        &self,
+        _state: &Self::State,
+        renderer: &Renderer,
+        _theme: &Theme,
+        bounds: Rectangle,
+        cursor: Cursor,
+    ) -> Vec<Geometry<Renderer>> {
+        let scale = self.scale;
+        let (width, height) = self.state.field_size();
+        let mut frame = canvas::Frame::new(renderer, bounds.size());
+        for x in 0..width {
+            for y in 0..height {
+                let color =
+                    self.palette.colors[self.state.field_at(x, y) % self.palette.colors.len()];
+                frame.fill_rectangle(
+                    Point::new(x as f32 * scale, y as f32 * scale),
+                    Size::new(scale, scale),
+                    color,
+                );
+
+                if self.state.is_ant(x, y) {
+                    frame.stroke_rectangle(
+                        Point::new(x as f32 * scale + 1.0, y as f32 * scale + 1.0),
+                        Size::new(scale - 2.0, scale - 2.0),
+                        Stroke {
+                            style: canvas::Style::Solid(self.ant_color),
+                            width: 1.0,
+                            line_cap: Default::default(),
+                            line_join: Default::default(),
+                            line_dash: Default::default(),
+                        },
+                    )
+                }
+            }
+        }
+
+        if let Some(point) = cursor.position_in(bounds) {
+            let (x, y) = ((point.x / scale) as usize, (point.y / scale) as usize);
+            if x <= width && y <= height {
+                frame.fill_text(canvas::Text {
+                    content: format!("({x:.0}, {y:.0})"),
+                    position: point,
+                    max_width: 200.0,
+                    color: Color::WHITE,
+                    size: Pixels(14.0),
+                    line_height: LineHeight::Absolute(Pixels(2.0)),
+                    font: Default::default(),
+                    align_x: Alignment::Left,
+                    align_y: Vertical::Bottom,
+                    shaping: Default::default(),
+                });
+            }
+        }
+
+        vec![frame.into_geometry()]
+    }
 }
 
 enum Pane {
@@ -134,6 +221,9 @@ impl Default for App {
             ctrl_pressed: false,
             step_requested: None,
             size_requested: None,
+            last_tick: None,
+            last_tick_duration: None,
+            scale: (256 * 5 / DEFAULT_SIZE.0) as f32,
         }
     }
 }
@@ -296,78 +386,28 @@ impl App {
     }
 
     fn view_field(&self) -> Element<'_, Message> {
-        let default_button_style: Style = Style {
-            background: Some(Background::Color(Color::TRANSPARENT)),
-            border: DEFAULT_BORDER,
-            ..Style::default()
-        };
-        let ant_button_style: Style = Style {
-            background: Some(Background::Color(Color::TRANSPARENT)),
-            border: Border {
-                color: self.ant_color,
-                width: 1.5,
-                radius: Default::default(),
-            },
-            ..Style::default()
-        };
-        let (x_max, y_max) = self.state.field_size();
+        // A scrollable provides correct boundaries for the canvas but fails to allow for scrolling;
+        // it should be handled manually with canvas, it seems.
         responsive(move |size| {
-            center_y(
-                scrollable(
-                    Column::with_children((0..y_max).flat_map(|y| {
-                        let mut children = vec![];
-
-                        let row =
-                            Element::from(Row::with_children((0..x_max).flat_map(move |x| {
-                                let mut children = vec![];
-
-                                children.push(
-                                    tooltip(
-                                        button("")
-                                            .on_press(Message::Click(x, y))
-                                            .width(CELL_SIZE)
-                                            .height(CELL_SIZE)
-                                            .style(move |_, _status| {
-                                                let color =
-                                                    self.palette.colors[self.state.field_at(x, y)
-                                                        % self.palette.colors.len()];
-                                                // TODO: optimize this
-                                                let style = if self.state.is_ant(x, y) {
-                                                    ant_button_style
-                                                } else {
-                                                    default_button_style
-                                                };
-                                                Style {
-                                                    background: Some(Background::Color(
-                                                        color.clone(),
-                                                    )),
-                                                    ..style
-                                                }
-                                            }),
-                                        text!("({}, {})", x, y),
-                                        tooltip::Position::FollowCursor,
-                                    )
-                                    .into(),
-                                );
-
-                                children.into_iter()
-                            })));
-                        children.push(row);
-
-                        children.into_iter()
-                    }))
-                    .padding(Padding::ZERO.right(10).bottom(10)),
-                )
+            scrollable(canvas(self))
                 .width(size.width)
                 .height(size.height)
                 .direction(scrollable::Direction::Both {
                     vertical: Default::default(),
                     horizontal: Default::default(),
-                }),
-            )
-            .into()
+                })
+                .into()
         })
         .into()
+    }
+
+    fn pause(&mut self) {
+        self.settings.paused = !self.settings.paused;
+        if !self.settings.paused {
+            self.step_requested = None;
+        } else {
+            self.last_tick = None;
+        }
     }
 
     fn view_palette(&self) -> Element<'_, Message> {
@@ -427,6 +467,17 @@ impl App {
         responsive(move |size| {
             scrollable(
                 column([
+                    text!(
+                        "draw ms: {} dps: {:.2}",
+                        self.last_tick_duration
+                            .map(|t| t.as_millis())
+                            .unwrap_or_default(),
+                        self.last_tick_duration
+                            .map(|t| 1.0 / t.as_secs_f64())
+                            .unwrap_or_default(),
+                    )
+                    .size(16)
+                    .into(),
                     text!(
                         "ms per draw: {}\nsteps per draw: {}",
                         self.settings.ms_per_tick,
@@ -608,16 +659,29 @@ impl App {
         }
 
         match message {
-            Message::Click(x, y) => {
-                if self.ctrl_pressed {
-                    self.state.remove_ant(x, y);
-                } else {
+            Message::Click(x, y, add) => {
+                if add {
                     self.state.add_ant(x, y, 0);
+                } else {
+                    self.state.remove_ant(x, y);
                 }
                 self.state.recalculate()
             }
             Message::Tick => {
+                // TODO: throttle events better when last_tick_duration is much bigger, than ms_per_tick
+                if let Some(last_tick) = self.last_tick {
+                    if last_tick.elapsed().as_secs_f32() < self.settings.ms_per_tick as f32 / 1000.0
+                    {
+                        return Task::none();
+                    }
+                }
                 self.state.step(self.settings.steps_per_tick);
+                if !self.settings.paused {
+                    if let Some(last_tick) = self.last_tick {
+                        self.last_tick_duration = Some(last_tick.elapsed());
+                    }
+                    self.last_tick = Some(Instant::now());
+                }
             }
             Message::Blink => {
                 self.ant_color = if self.ant_color == Color::from_rgb(0.0, 1.0, 0.2) {
@@ -626,9 +690,7 @@ impl App {
                     Color::from_rgb(0.0, 1.0, 0.2)
                 };
             }
-            Message::Pause => {
-                self.settings.paused = !self.settings.paused;
-            }
+            Message::Pause => self.pause(),
             Message::Event(event) => match event {
                 Event::Keyboard(keyboard::Event::KeyPressed {
                     key: keyboard::Key::Named(key::Named::Escape),
@@ -703,9 +765,7 @@ impl App {
                 Event::Keyboard(keyboard::Event::KeyPressed {
                     key: keyboard::Key::Named(key::Named::Space),
                     ..
-                }) => {
-                    self.settings.paused = !self.settings.paused;
-                }
+                }) => self.pause(),
                 Event::Keyboard(keyboard::Event::KeyPressed {
                     key: keyboard::Key::Named(key::Named::Tab),
                     modifiers,
@@ -855,6 +915,7 @@ impl App {
             Message::SkipForward => {
                 self.state
                     .go_to_step((self.state.generation() / 100_000 + 1) * 100_000);
+                self.step_requested = None;
             }
         }
         Task::none()

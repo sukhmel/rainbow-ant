@@ -3,6 +3,7 @@ use std::fmt::{Display, Formatter};
 use std::ops::{Add, AddAssign};
 
 pub const MAX_CELL_COUNT: usize = 1024;
+pub const DEFAULT_SIZE: (usize, usize) = (256, 256);
 
 #[derive(Debug, Clone)]
 struct Field {
@@ -13,8 +14,8 @@ struct Field {
 
 impl Default for Field {
     fn default() -> Self {
-        let width = 256;
-        let height = 256;
+        let width = DEFAULT_SIZE.0;
+        let height = DEFAULT_SIZE.1;
         Self {
             width,
             height,
@@ -192,8 +193,8 @@ impl Ant {
 
 impl Default for Ant {
     fn default() -> Self {
-        let x0 = 128;
-        let y0 = 128;
+        let x0 = DEFAULT_SIZE.0 / 2;
+        let y0 = DEFAULT_SIZE.1 / 2;
         let position = Position {
             x: x0,
             y: y0,
@@ -345,14 +346,16 @@ impl State {
 
     pub fn set_width(&mut self, width: usize) {
         for ant in &mut self.ants {
-            ant.start_position.x = (ant.start_position.x as f64 / self.field.width as f64 * width as f64) as usize;
+            ant.start_position.x =
+                (ant.start_position.x as f64 / self.field.width as f64 * width as f64) as usize;
         }
         self.field.width = width;
     }
 
     pub fn set_height(&mut self, height: usize) {
         for ant in &mut self.ants {
-            ant.start_position.y = (ant.start_position.y as f64 / self.field.height as f64 * height as f64) as usize;
+            ant.start_position.y =
+                (ant.start_position.y as f64 / self.field.height as f64 * height as f64) as usize;
         }
         self.field.height = height;
     }
