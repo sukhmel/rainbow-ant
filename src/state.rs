@@ -2,17 +2,23 @@ use std::collections::BTreeMap;
 use std::fmt::{Display, Formatter};
 use std::ops::{Add, AddAssign};
 
-pub const CELL_COUNT: usize = 256;
+pub const MAX_CELL_COUNT: usize = 1024;
 
 #[derive(Debug, Clone)]
 struct Field {
+    width: usize,
+    height: usize,
     values: Vec<Vec<u8>>,
 }
 
 impl Default for Field {
     fn default() -> Self {
+        let width = 256;
+        let height = 256;
         Self {
-            values: vec![vec![0; CELL_COUNT]; CELL_COUNT],
+            width,
+            height,
+            values: vec![vec![0; MAX_CELL_COUNT]; MAX_CELL_COUNT],
         }
     }
 }
@@ -152,32 +158,32 @@ pub struct Ant {
 }
 
 impl Ant {
-    fn travel(&mut self, direction: Direction) {
+    fn travel(&mut self, direction: Direction, width: usize, height: usize) {
         self.position.orientation += direction;
 
         match self.position.orientation {
             Direction::North | Direction::NorthEast | Direction::NorthWest => {
                 if self.position.y == 0 {
-                    self.position.y = CELL_COUNT - 1;
+                    self.position.y = height - 1;
                 } else {
                     self.position.y -= 1;
                 }
             }
             Direction::South | Direction::SouthEast | Direction::SouthWest => {
-                self.position.y = (self.position.y + 1) % CELL_COUNT;
+                self.position.y = (self.position.y + 1) % height;
             }
             Direction::East | Direction::West => {}
         }
         match self.position.orientation {
             Direction::West | Direction::NorthWest | Direction::SouthWest => {
                 if self.position.x == 0 {
-                    self.position.x = CELL_COUNT - 1;
+                    self.position.x = width - 1;
                 } else {
-                    self.position.x = (self.position.x - 1) % CELL_COUNT;
+                    self.position.x = (self.position.x - 1) % width;
                 }
             }
             Direction::East | Direction::SouthEast | Direction::NorthEast => {
-                self.position.x = (self.position.x + 1) % CELL_COUNT;
+                self.position.x = (self.position.x + 1) % width;
             }
             Direction::North | Direction::South => {}
         }
@@ -186,8 +192,8 @@ impl Ant {
 
 impl Default for Ant {
     fn default() -> Self {
-        let x0 = CELL_COUNT / 2;
-        let y0 = CELL_COUNT / 2;
+        let x0 = 128;
+        let y0 = 128;
         let position = Position {
             x: x0,
             y: y0,
@@ -262,7 +268,7 @@ impl State {
                     [&self.field.values[ant.position.x][ant.position.y]];
                 self.field.values[ant.position.x][ant.position.y] = next.0;
                 if let Some(direction) = next.1 {
-                    ant.travel(direction);
+                    ant.travel(direction, self.field.width, self.field.height);
                 }
             }
         }
@@ -275,11 +281,11 @@ impl State {
     }
 
     pub fn field_size(&self) -> (usize, usize) {
-        (self.field.values.len(), self.field.values[0].len())
+        (self.field.width, self.field.height)
     }
 
     pub fn field_at(&self, x: usize, y: usize) -> usize {
-        self.field.values[x % CELL_COUNT][y % CELL_COUNT] as usize
+        self.field.values[x % self.field.width][y % self.field.height] as usize
     }
 
     pub fn generation(&self) -> usize {
@@ -287,8 +293,8 @@ impl State {
     }
 
     pub fn add_ant(&mut self, x: usize, y: usize, instruction: usize) {
-        let x = x % CELL_COUNT;
-        let y = y % CELL_COUNT;
+        let x = x % self.field.width;
+        let y = y % self.field.height;
         if self
             .ants
             .iter()
@@ -325,7 +331,7 @@ impl State {
     pub fn reset(&mut self) -> usize {
         let steps = self.generation;
         self.generation = 0;
-        self.field = Field::default();
+        self.field.values = vec![vec![0; MAX_CELL_COUNT]; MAX_CELL_COUNT];
         for ant in &mut self.ants {
             ant.position = ant.start_position.clone();
         }
@@ -335,5 +341,19 @@ impl State {
     pub fn recalculate(&mut self) {
         let steps = self.reset();
         self.step(steps);
+    }
+
+    pub fn set_width(&mut self, width: usize) {
+        for ant in &mut self.ants {
+            ant.start_position.x = (ant.start_position.x as f64 / self.field.width as f64 * width as f64) as usize;
+        }
+        self.field.width = width;
+    }
+
+    pub fn set_height(&mut self, height: usize) {
+        for ant in &mut self.ants {
+            ant.start_position.y = (ant.start_position.y as f64 / self.field.height as f64 * height as f64) as usize;
+        }
+        self.field.height = height;
     }
 }

@@ -18,6 +18,7 @@ TODO:
 - [ ] Visual direction picker
 - [ ] Zoom in/out ([viewport](https://docs.rs/iced_glow/latest/iced_glow/struct.Viewport.html) 
     with [canvas](https://docs.rs/iced/latest/iced/widget/canvas/index.html)?)
+- [x] Grid resize
 - [ ] Support for hexagonal grid
   - [ ] display grid
   - [ ] move set

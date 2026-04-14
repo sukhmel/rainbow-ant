@@ -1,4 +1,4 @@
-use crate::state::{CELL_COUNT, Direction, Instruction};
+use crate::state::{Direction, Instruction, MAX_CELL_COUNT};
 use crate::state::{Position, State};
 use iced::border::Radius;
 use iced::keyboard::key;
@@ -32,7 +32,10 @@ const DEFAULT_BORDER: Border = Border {
 #[derive(Debug, Clone)]
 pub enum Message {
     RequestStep(usize),
+    RequestWidth(usize),
+    RequestHeight(usize),
     ApplyStep,
+    ApplySize,
     Blink,
     Click(usize, usize),
     Tick,
@@ -91,6 +94,7 @@ pub struct App {
     ant_color: Color,
     ctrl_pressed: bool,
     step_requested: Option<usize>,
+    size_requested: Option<(usize, usize)>,
 }
 
 enum Pane {
@@ -129,6 +133,7 @@ impl Default for App {
             ant_color: Color::from_rgb(0.0, 1.0, 0.2),
             ctrl_pressed: false,
             step_requested: None,
+            size_requested: None,
         }
     }
 }
@@ -223,28 +228,32 @@ impl App {
                     let start_position_for_y = ant.start_position.clone();
                     Grid::from_vec(vec![
                         center_y(text!("x")).into(),
-                        NumberInput::new(&ant.start_position.x, 0..CELL_COUNT, move |x| {
-                            Message::SetUpAnt {
+                        NumberInput::new(
+                            &ant.start_position.x,
+                            0..self.state.field_size().0,
+                            move |x| Message::SetUpAnt {
                                 ant_index,
                                 start_position: Position {
                                     x,
                                     ..start_position_for_x
                                 },
                                 instruction,
-                            }
-                        })
+                            },
+                        )
                         .into(),
                         center_y(text!("y")).into(),
-                        NumberInput::new(&ant.start_position.y, 0..CELL_COUNT, move |y| {
-                            Message::SetUpAnt {
+                        NumberInput::new(
+                            &ant.start_position.y,
+                            0..self.state.field_size().1,
+                            move |y| Message::SetUpAnt {
                                 ant_index,
                                 start_position: Position {
                                     y,
                                     ..start_position_for_y
                                 },
                                 instruction,
-                            }
-                        })
+                            },
+                        )
                         .into(),
                         center_y(text!("start")).into(),
                         button(
@@ -411,6 +420,10 @@ impl App {
             .step_requested
             .unwrap_or_else(|| self.state.generation());
 
+        let (width, height) = self
+            .size_requested
+            .unwrap_or_else(|| self.state.field_size());
+
         responsive(move |size| {
             scrollable(
                 column([
@@ -440,6 +453,19 @@ impl App {
                         space().width(10).into(),
                         NumberInput::new(&generation, 0.., Message::RequestStep).into(),
                         button(text!("go")).on_press(Message::ApplyStep).into(),
+                    ])
+                    .into(),
+                    row([
+                        center_y(text!("size").size(16)).into(),
+                        space().width(10).into(),
+                        NumberInput::new(&width, 1..MAX_CELL_COUNT, Message::RequestWidth)
+                            .width(70.0)
+                            .into(),
+                        center_y(text!("×").size(16)).into(),
+                        NumberInput::new(&height, 1..MAX_CELL_COUNT, Message::RequestHeight)
+                            .width(70.0)
+                            .into(),
+                        button(text!("go")).on_press(Message::ApplySize).into(),
                     ])
                     .into(),
                 ])
@@ -807,6 +833,23 @@ impl App {
             Message::ApplyStep => {
                 if let Some(step) = self.step_requested.take() {
                     self.state.go_to_step(step);
+                }
+            }
+            Message::RequestWidth(width) => {
+                self.size_requested
+                    .get_or_insert_with(|| self.state.field_size())
+                    .0 = width;
+            }
+            Message::RequestHeight(height) => {
+                self.size_requested
+                    .get_or_insert_with(|| self.state.field_size())
+                    .1 = height;
+            }
+            Message::ApplySize => {
+                if let Some((width, height)) = self.size_requested.take() {
+                    self.state.set_width(width);
+                    self.state.set_height(height);
+                    self.state.recalculate();
                 }
             }
             Message::SkipForward => {
