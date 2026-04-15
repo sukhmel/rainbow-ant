@@ -241,7 +241,7 @@ impl State {
         if let Some(diff) = step.checked_sub(self.generation) {
             self.step(diff);
         } else if let Some((record, snapshot)) =
-            self.snapshots.iter().filter(|(a, _)| **a < step).last()
+            self.snapshots.iter().filter(|(a, _)| **a <= step).last()
         {
             self.generation = *record;
             self.field = snapshot.field.clone();
@@ -275,10 +275,9 @@ impl State {
         }
     }
 
-    pub fn is_ant(&self, x: usize, y: usize) -> bool {
-        self.ants
-            .iter()
-            .any(|ant| ant.position.x == x && ant.position.y == y)
+    /// Iterator over ant positions.
+    pub fn ants(&self) -> impl Iterator<Item = (usize, usize)> {
+        self.ants.iter().map(|ant| (ant.position.x, ant.position.y))
     }
 
     pub fn field_size(&self) -> (usize, usize) {

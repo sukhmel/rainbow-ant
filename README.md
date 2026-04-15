@@ -16,7 +16,7 @@ TODO:
   - [ ] Reorder ants
   - [ ] Remove ants using the ants pane
 - [ ] Visual direction picker
-- [ ] Zoom in/out ([viewport](https://docs.rs/iced_glow/latest/iced_glow/struct.Viewport.html) 
+- [x] Zoom in/out ([viewport](https://docs.rs/iced_glow/latest/iced_glow/struct.Viewport.html) 
     with [canvas](https://docs.rs/iced/latest/iced/widget/canvas/index.html)?)
 - [x] Grid resize
 - [ ] Support for hexagonal grid

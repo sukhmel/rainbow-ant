@@ -20,6 +20,8 @@ use iced::{Fill, Task, event, exit};
 use iced_aw::{NumberInput, color_picker};
 use std::collections::BTreeMap;
 use std::iter::once;
+use std::ops::ControlFlow;
+use std::thread::{JoinHandle, spawn};
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone)]
@@ -32,6 +34,7 @@ pub enum Message {
     Blink,
     Click(usize, usize, bool),
     Tick,
+    PollUpdate,
     SkipForward,
     Event(Event),
     Resized(pane_grid::ResizeEvent),
@@ -91,6 +94,7 @@ pub struct App {
     scale: f32,
     last_tick: Option<Instant>,
     last_tick_duration: Option<Duration>,
+    update_join_handle: Option<JoinHandle<(State, Duration, Instant)>>,
 }
 
 impl canvas::Program<Message> for App {
@@ -145,21 +149,21 @@ impl canvas::Program<Message> for App {
                     Size::new(scale, scale),
                     color,
                 );
-
-                if self.state.is_ant(x, y) {
-                    frame.stroke_rectangle(
-                        Point::new(x as f32 * scale + 1.0, y as f32 * scale + 1.0),
-                        Size::new(scale - 2.0, scale - 2.0),
-                        Stroke {
-                            style: canvas::Style::Solid(self.ant_color),
-                            width: 1.0,
-                            line_cap: Default::default(),
-                            line_join: Default::default(),
-                            line_dash: Default::default(),
-                        },
-                    )
-                }
             }
+        }
+
+        for (x, y) in self.state.ants() {
+            frame.stroke_rectangle(
+                Point::new(x as f32 * scale + 1.0, y as f32 * scale + 1.0),
+                Size::new(scale - 2.0, scale - 2.0),
+                Stroke {
+                    style: canvas::Style::Solid(self.ant_color),
+                    width: 2.0,
+                    line_cap: Default::default(),
+                    line_join: Default::default(),
+                    line_dash: Default::default(),
+                },
+            )
         }
 
         if let Some(point) = cursor.position_in(bounds) {
@@ -224,6 +228,7 @@ impl Default for App {
             last_tick: None,
             last_tick_duration: None,
             scale: (256 * 5 / DEFAULT_SIZE.0) as f32,
+            update_join_handle: None,
         }
     }
 }
@@ -389,14 +394,18 @@ impl App {
         // A scrollable provides correct boundaries for the canvas but fails to allow for scrolling;
         // it should be handled manually with canvas, it seems.
         responsive(move |size| {
-            scrollable(canvas(self))
-                .width(size.width)
-                .height(size.height)
-                .direction(scrollable::Direction::Both {
-                    vertical: Default::default(),
-                    horizontal: Default::default(),
-                })
-                .into()
+            scrollable(
+                canvas(self)
+                    .width(self.scale * self.state.field_size().0 as f32)
+                    .height(self.scale * self.state.field_size().1 as f32),
+            )
+            .width(size.width)
+            .height(size.height)
+            .direction(scrollable::Direction::Both {
+                vertical: Default::default(),
+                horizontal: Default::default(),
+            })
+            .into()
         })
         .into()
     }
@@ -408,6 +417,31 @@ impl App {
         } else {
             self.last_tick = None;
         }
+    }
+
+    fn poll_update(&mut self) -> ControlFlow<(), ()> {
+        if let Some(join_handle) = self.update_join_handle.take() {
+            if !join_handle.is_finished() {
+                self.update_join_handle = Some(join_handle);
+                return ControlFlow::Break(());
+            } else {
+                let (state, duration, tick) = join_handle.join().unwrap();
+                self.state = state;
+                self.last_tick_duration = Some(duration);
+                self.last_tick = Some(tick);
+            }
+        }
+        ControlFlow::Continue(())
+    }
+
+    fn defer_update(&mut self, f: impl FnOnce(&mut State) + Send + 'static) {
+        let mut state = self.state.clone();
+
+        self.update_join_handle = Some(spawn(move || {
+            let start = Instant::now();
+            f(&mut state);
+            (state, start.elapsed(), Instant::now())
+        }));
     }
 
     fn view_palette(&self) -> Element<'_, Message> {
@@ -665,23 +699,20 @@ impl App {
                 } else {
                     self.state.remove_ant(x, y);
                 }
-                self.state.recalculate()
+                self.defer_update(|state| state.recalculate());
+            }
+            Message::PollUpdate => {
+                let _ = self.poll_update();
             }
             Message::Tick => {
-                // TODO: throttle events better when last_tick_duration is much bigger, than ms_per_tick
-                if let Some(last_tick) = self.last_tick {
-                    if last_tick.elapsed().as_secs_f32() < self.settings.ms_per_tick as f32 / 1000.0
-                    {
-                        return Task::none();
-                    }
+                if self.poll_update().is_break() {
+                    return Task::none();
                 }
-                self.state.step(self.settings.steps_per_tick);
-                if !self.settings.paused {
-                    if let Some(last_tick) = self.last_tick {
-                        self.last_tick_duration = Some(last_tick.elapsed());
-                    }
-                    self.last_tick = Some(Instant::now());
-                }
+
+                let steps = self.settings.steps_per_tick;
+                self.defer_update(move |state| {
+                    state.step(steps);
+                });
             }
             Message::Blink => {
                 self.ant_color = if self.ant_color == Color::from_rgb(0.0, 1.0, 0.2) {
@@ -705,6 +736,22 @@ impl App {
                     ..
                 }) => {
                     self.state.reset();
+                }
+                Event::Keyboard(keyboard::Event::KeyPressed {
+                    physical_key: key::Physical::Code(key::Code::Minus),
+                    ..
+                }) => {
+                    if self.scale > 1.0 {
+                        self.scale -= 1.0;
+                    }
+                }
+                Event::Keyboard(keyboard::Event::KeyPressed {
+                    physical_key: key::Physical::Code(key::Code::Equal),
+                    ..
+                }) => {
+                    if self.scale < 20.0 {
+                        self.scale += 1.0;
+                    }
                 }
                 Event::Keyboard(keyboard::Event::KeyPressed {
                     key: keyboard::Key::Named(key::Named::ArrowUp),
@@ -820,7 +867,7 @@ impl App {
                 if let Some(ant) = self.state.ants.get_mut(ant_index) {
                     ant.start_position = position;
                     ant.instruction = instruction;
-                    self.state.recalculate();
+                    self.defer_update(|state| state.recalculate());
                 }
             }
             Message::RotateAnt(index) => {
@@ -832,7 +879,7 @@ impl App {
                         ant.start_position.orientation =
                             ant.start_position.orientation + Direction::NorthEast;
                     }
-                    self.state.recalculate();
+                    self.defer_update(|state| state.recalculate());
                 }
             }
             Message::RotateInstructionDirection {
@@ -864,7 +911,7 @@ impl App {
                         }
                     }
 
-                    self.state.recalculate();
+                    self.defer_update(|state| state.recalculate());
                 }
             }
             Message::RotateInstructionPalette {
@@ -884,7 +931,7 @@ impl App {
                         }
                     }
 
-                    self.state.recalculate();
+                    self.defer_update(|state| state.recalculate());
                 }
             }
             Message::RequestStep(step) => {
@@ -909,7 +956,7 @@ impl App {
                 if let Some((width, height)) = self.size_requested.take() {
                     self.state.set_width(width);
                     self.state.set_height(height);
-                    self.state.recalculate();
+                    self.defer_update(|state| state.recalculate());
                 }
             }
             Message::SkipForward => {
@@ -929,12 +976,21 @@ impl App {
                 Duration::from_millis(200),
             ),
         ];
-        if !self.settings.paused && self.settings.steps_per_tick > 0 {
+
+        let running = !self.settings.paused && self.settings.steps_per_tick > 0;
+        let polling = self.update_join_handle.is_some();
+        if running {
             subscriptions.push(time::repeat(
                 || futures::future::ready(Message::Tick),
                 Duration::from_millis(self.settings.ms_per_tick as u64),
             ));
+        } else if polling {
+            subscriptions.push(time::repeat(
+                || futures::future::ready(Message::PollUpdate),
+                Duration::from_secs(1),
+            ));
         }
+
         Subscription::batch(subscriptions)
     }
 }
