@@ -23,8 +23,9 @@ TODO:
   - [ ] display grid
   - [ ] move set
 - [ ] Support for triangular grid
-  - [ ] display grid
-  - [ ] move set
+  - [x] display grid
+  - [x] move set
+  - [ ] initial ant position adjusted to initial cell orientation
 - [ ] Save/load configuration
 - [ ] Save/load state
 - [ ] Undo/redo

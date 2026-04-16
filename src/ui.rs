@@ -1,10 +1,12 @@
-use crate::state::{DEFAULT_SIZE, Direction, Instruction, MAX_CELL_COUNT};
+use crate::state;
+use crate::state::{Direction, GridType, Instruction, MAX_CELL_COUNT};
 use crate::state::{Position, State};
 use crate::ui::button::Style;
 use iced::alignment::Vertical;
 use iced::keyboard::key;
 use iced::mouse::Cursor;
-use iced::widget::canvas::{Geometry, Stroke};
+use iced::widget::canvas::path::lyon_path::PathEvent;
+use iced::widget::canvas::{Geometry, Path, Stroke};
 use iced::widget::pane_grid::Axis;
 use iced::widget::text::{Alignment, LineHeight};
 use iced::widget::{
@@ -13,7 +15,7 @@ use iced::widget::{
 };
 use iced::{
     Background, Border, Color, Element, Padding, Pixels, Point, Rectangle, Renderer, Size,
-    Subscription, Theme, futures,
+    Subscription, Theme, futures, mouse,
 };
 use iced::{Event, keyboard, time};
 use iced::{Fill, Task, event, exit};
@@ -107,22 +109,22 @@ impl canvas::Program<Message> for App {
         bounds: Rectangle,
         cursor: Cursor,
     ) -> Option<Action<Message>> {
-        let Event::Mouse(iced::mouse::Event::ButtonReleased(button)) = event else {
+        let Event::Mouse(mouse::Event::ButtonReleased(button)) = event else {
             return None;
         };
 
-        let scale = self.scale;
         let (width, height) = self.state.field_size();
         let Some(point) = cursor.position_in(bounds) else {
             return None;
         };
 
-        let (x, y) = ((point.x / scale) as usize, (point.y / scale) as usize);
-
-        if x <= width && y <= height {
-            if *button == iced::mouse::Button::Left {
+        if let Some((x, y)) = self.point_to_logical_coordinates(point)
+            && x <= width
+            && y <= height
+        {
+            if *button == mouse::Button::Left {
                 return Some(Action::publish(Message::Click(x, y, true).into()));
-            } else if *button == iced::mouse::Button::Right {
+            } else if *button == mouse::Button::Right {
                 return Some(Action::publish(Message::Click(x, y, false).into()));
             }
         }
@@ -144,31 +146,52 @@ impl canvas::Program<Message> for App {
             for y in 0..height {
                 let color =
                     self.palette.colors[self.state.field_at(x, y) % self.palette.colors.len()];
-                frame.fill_rectangle(
-                    Point::new(x as f32 * scale, y as f32 * scale),
-                    Size::new(scale, scale),
-                    color,
-                );
+                match self.state.grid_type {
+                    GridType::Square | GridType::SquareDiagonal => {
+                        frame.fill_rectangle(
+                            Point::new(x as f32 * scale, y as f32 * scale),
+                            Size::new(scale, scale),
+                            color,
+                        );
+                    }
+                    GridType::Hexagonal => {}
+                    GridType::Triangular => frame.fill(&triangle_path(scale, x, y, 0.0), color),
+                }
             }
         }
 
-        for (x, y) in self.state.ants() {
-            frame.stroke_rectangle(
-                Point::new(x as f32 * scale + 1.0, y as f32 * scale + 1.0),
-                Size::new(scale - 2.0, scale - 2.0),
-                Stroke {
-                    style: canvas::Style::Solid(self.ant_color),
-                    width: 2.0,
-                    line_cap: Default::default(),
-                    line_join: Default::default(),
-                    line_dash: Default::default(),
-                },
-            )
-        }
-
         if let Some(point) = cursor.position_in(bounds) {
-            let (x, y) = ((point.x / scale) as usize, (point.y / scale) as usize);
-            if x <= width && y <= height {
+            if let Some((x, y)) = self.point_to_logical_coordinates(point)
+                && x <= width
+                && y <= height
+            {
+                match self.state.grid_type {
+                    GridType::Triangular => {
+                        let target = triangle_path(scale, x, y, 0.0);
+                        frame.stroke(
+                            &target,
+                            Stroke {
+                                style: canvas::Style::Solid(Color::from_rgb(0.9, 0.9, 0.3)),
+                                width: 2.0,
+                                line_cap: Default::default(),
+                                line_join: Default::default(),
+                                line_dash: Default::default(),
+                            },
+                        );
+                    }
+                    GridType::Square | GridType::SquareDiagonal => frame.stroke_rectangle(
+                        Point::new(x as f32 * scale + 1.0, y as f32 * scale + 1.0),
+                        Size::new(scale - 2.0, scale - 2.0),
+                        Stroke {
+                            style: canvas::Style::Solid(Color::from_rgb(0.9, 0.9, 0.3)),
+                            width: 2.0,
+                            line_cap: Default::default(),
+                            line_join: Default::default(),
+                            line_dash: Default::default(),
+                        },
+                    ),
+                    _ => {}
+                }
                 frame.fill_text(canvas::Text {
                     content: format!("({x:.0}, {y:.0})"),
                     position: point,
@@ -181,6 +204,33 @@ impl canvas::Program<Message> for App {
                     align_y: Vertical::Bottom,
                     shaping: Default::default(),
                 });
+            }
+        }
+
+        for (x, y) in self.state.ants() {
+            match self.state.grid_type {
+                GridType::Square | GridType::SquareDiagonal => frame.stroke_rectangle(
+                    Point::new(x as f32 * scale + 1.0, y as f32 * scale + 1.0),
+                    Size::new(scale - 2.0, scale - 2.0),
+                    Stroke {
+                        style: canvas::Style::Solid(self.ant_color),
+                        width: 2.0,
+                        line_cap: Default::default(),
+                        line_join: Default::default(),
+                        line_dash: Default::default(),
+                    },
+                ),
+                GridType::Hexagonal => {}
+                GridType::Triangular => frame.stroke(
+                    &triangle_path(scale, x, y, 1.0),
+                    Stroke {
+                        style: canvas::Style::Solid(self.ant_color),
+                        width: 2.0,
+                        line_cap: Default::default(),
+                        line_join: Default::default(),
+                        line_dash: Default::default(),
+                    },
+                ),
             }
         }
 
@@ -227,7 +277,7 @@ impl Default for App {
             size_requested: None,
             last_tick: None,
             last_tick_duration: None,
-            scale: (256 * 5 / DEFAULT_SIZE.0) as f32,
+            scale: 20.0,
             update_join_handle: None,
         }
     }
@@ -352,9 +402,15 @@ impl App {
                         .into(),
                         center_y(text!("start")).into(),
                         button(
-                            text!("{}", ant.start_position.orientation)
-                                .size(16)
-                                .center(),
+                            text!(
+                                "{}",
+                                state::effective_direction(
+                                    self.state.grid_type,
+                                    ant.start_position.orientation
+                                )
+                            )
+                            .size(16)
+                            .center(),
                         )
                         .on_press(Message::RotateAnt(ant_index))
                         .into(),
@@ -395,9 +451,12 @@ impl App {
         // it should be handled manually with canvas, it seems.
         responsive(move |size| {
             scrollable(
-                canvas(self)
-                    .width(self.scale * self.state.field_size().0 as f32)
-                    .height(self.scale * self.state.field_size().1 as f32),
+                mouse_area(
+                    canvas(self)
+                        .width(self.scale * self.state.field_size().0 as f32)
+                        .height(self.scale * self.state.field_size().1 as f32),
+                )
+                .interaction(mouse::Interaction::Crosshair),
             )
             .width(size.width)
             .height(size.height)
@@ -501,6 +560,7 @@ impl App {
         responsive(move |size| {
             scrollable(
                 column([
+                    text!("grid: {:?}", self.state.grid_type,).size(16).into(),
                     text!(
                         "draw ms: {} dps: {:.2}",
                         self.last_tick_duration
@@ -620,7 +680,11 @@ impl App {
                                         text!(
                                             "{}",
                                             direction
-                                                .map(|d| d.to_string())
+                                                .map(|d| state::effective_direction(
+                                                    self.state.grid_type,
+                                                    d
+                                                )
+                                                .to_string())
                                                 .unwrap_or(String::from("⊙"))
                                         )
                                         .size(16)
@@ -738,6 +802,13 @@ impl App {
                     self.state.reset();
                 }
                 Event::Keyboard(keyboard::Event::KeyPressed {
+                    physical_key: key::Physical::Code(key::Code::KeyG),
+                    ..
+                }) => {
+                    self.state.grid_type = state::next_grid_type(self.state.grid_type);
+                    self.defer_update(|state| state.recalculate());
+                }
+                Event::Keyboard(keyboard::Event::KeyPressed {
                     physical_key: key::Physical::Code(key::Code::Minus),
                     ..
                 }) => {
@@ -749,7 +820,7 @@ impl App {
                     physical_key: key::Physical::Code(key::Code::Equal),
                     ..
                 }) => {
-                    if self.scale < 20.0 {
+                    if self.scale < 40.0 {
                         self.scale += 1.0;
                     }
                 }
@@ -889,25 +960,9 @@ impl App {
                 if let Some(instruction) = self.state.instructions.get_mut(instruction_index) {
                     if let Some((_, target)) = instruction.map.get_mut(&palette_index) {
                         if self.ctrl_pressed {
-                            if let Some(direction) = target {
-                                if *direction == Direction::North {
-                                    *target = None;
-                                } else {
-                                    *direction = *direction + Direction::NorthWest;
-                                }
-                            } else {
-                                *target = Some(Direction::NorthWest);
-                            }
+                            *target = state::prev_direction(self.state.grid_type, *target);
                         } else {
-                            if let Some(direction) = target {
-                                if *direction == Direction::NorthWest {
-                                    *target = None;
-                                } else {
-                                    *direction = *direction + Direction::NorthEast;
-                                }
-                            } else {
-                                *target = Some(Direction::North);
-                            }
+                            *target = state::next_direction(self.state.grid_type, *target);
                         }
                     }
 
@@ -993,6 +1048,50 @@ impl App {
 
         Subscription::batch(subscriptions)
     }
+
+    fn point_to_logical_coordinates(&self, point: Point) -> Option<(usize, usize)> {
+        let scale = self.scale;
+        match self.state.grid_type {
+            GridType::Square | GridType::SquareDiagonal => {
+                Some(((point.x / scale) as usize, (point.y / scale) as usize))
+            }
+            // TODO
+            GridType::Hexagonal => Some(((point.x / scale) as usize, (point.y / scale) as usize)),
+            GridType::Triangular => {
+                let y = (point.y * 2.0 / scale / f32::sqrt(3.0)) as usize;
+                let x = (point.x / scale) as usize * 2;
+                let x_left = x.saturating_sub(2);
+                let x_right = x;
+                let x_center = x.saturating_sub(1);
+                let triangle_left = self.triangle_at(x_left, y);
+                let triangle_right = self.triangle_at(x_right, y);
+                let triangle_center = self.triangle_at(x_center, y);
+
+                if is_point_in_triangle(point, &triangle_left) {
+                    Some((x_left, y))
+                } else if is_point_in_triangle(point, &triangle_center) {
+                    Some((x_center, y))
+                } else if is_point_in_triangle(point, &triangle_right) {
+                    Some((x_right, y))
+                } else {
+                    None
+                }
+            }
+        }
+    }
+
+    fn triangle_at(&self, x: usize, y: usize) -> Vec<(Point, Point)> {
+        triangle_path(self.scale, x, y, 0.0)
+            .raw()
+            .iter()
+            .filter_map(|p| match p {
+                PathEvent::Line { from, to } => {
+                    Some((Point::new(from.x, from.y), Point::new(to.x, to.y)))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    }
 }
 
 fn modal<'a, Message>(
@@ -1020,4 +1119,58 @@ where
         })
     ]
     .into()
+}
+
+fn triangle_path(scale: f32, x: usize, y: usize, padding: f32) -> Path {
+    Path::new(|builder| {
+        let inverted = (x + y) % 2 == 0;
+        let shift = if y % 2 == 0 {
+            0.0
+        } else {
+            0.5 * scale * if (x % 2) == 0 { 1.0 } else { -1.0 }
+        };
+        let y = f32::sqrt(3.0) / 2.0 * (y as f32) * scale;
+        if !inverted {
+            let x = shift + (((x + 1) / 2) as f32) * scale;
+            builder.move_to(Point::new(x + padding, y + padding));
+            builder.line_to(Point::new(x + scale - padding, y + padding));
+            builder.line_to(Point::new(
+                x + scale / 2.0,
+                y + (scale / 2.0) * f32::sqrt(3.0) - padding,
+            ));
+        } else {
+            let x = shift + (((x + 1) / 2 + 1) as f32) * scale;
+            builder.move_to(Point::new(x, y + padding));
+            builder.line_to(Point::new(
+                x + scale / 2.0 - padding,
+                y + (scale / 2.0) * f32::sqrt(3.0) - padding,
+            ));
+            builder.line_to(Point::new(
+                x - scale / 2.0 + padding,
+                y + (scale / 2.0) * f32::sqrt(3.0) - padding,
+            ));
+        }
+        builder.close();
+    })
+}
+
+fn is_point_in_triangle(point: Point, triangle: &[(Point, Point)]) -> bool {
+    let [(a, b), (_b, c)] = triangle else {
+        return false;
+    };
+    let v0 = *c - *a;
+    let v1 = *b - *a;
+    let v2 = point - *a;
+
+    let dot00 = v0.x * v0.x + v0.y * v0.y;
+    let dot01 = v0.x * v1.x + v0.y * v1.y;
+    let dot02 = v0.x * v2.x + v0.y * v2.y;
+    let dot11 = v1.x * v1.x + v1.y * v1.y;
+    let dot12 = v1.x * v2.x + v1.y * v2.y;
+
+    let denom = dot00 * dot11 - dot01 * dot01;
+    let u = (dot11 * dot02 - dot01 * dot12) / denom;
+    let v = (dot00 * dot12 - dot01 * dot02) / denom;
+
+    u >= 0.0 && v >= 0.0 && u + v < 1.0
 }

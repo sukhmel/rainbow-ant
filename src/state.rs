@@ -3,7 +3,15 @@ use std::fmt::{Display, Formatter};
 use std::ops::{Add, AddAssign};
 
 pub const MAX_CELL_COUNT: usize = 1024;
-pub const DEFAULT_SIZE: (usize, usize) = (256, 256);
+pub const DEFAULT_SIZE: (usize, usize) = (64, 64);
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum GridType {
+    Square,
+    SquareDiagonal,
+    Hexagonal,
+    Triangular,
+}
 
 #[derive(Debug, Clone)]
 struct Field {
@@ -159,34 +167,96 @@ pub struct Ant {
 }
 
 impl Ant {
-    fn travel(&mut self, direction: Direction, width: usize, height: usize) {
-        self.position.orientation += direction;
+    fn travel(&mut self, grid_type: GridType, direction: Direction, width: usize, height: usize) {
+        match grid_type {
+            GridType::SquareDiagonal | GridType::Square => {
+                self.position.orientation += effective_direction(grid_type, direction);
 
-        match self.position.orientation {
-            Direction::North | Direction::NorthEast | Direction::NorthWest => {
-                if self.position.y == 0 {
-                    self.position.y = height - 1;
-                } else {
-                    self.position.y -= 1;
+                match self.position.orientation {
+                    Direction::North | Direction::NorthEast | Direction::NorthWest => {
+                        if self.position.y == 0 {
+                            self.position.y = height - 1;
+                        } else {
+                            self.position.y -= 1;
+                        }
+                    }
+                    Direction::South | Direction::SouthEast | Direction::SouthWest => {
+                        self.position.y = (self.position.y + 1) % height;
+                    }
+                    Direction::East | Direction::West => {}
+                }
+                match self.position.orientation {
+                    Direction::West | Direction::NorthWest | Direction::SouthWest => {
+                        if self.position.x == 0 {
+                            self.position.x = width - 1;
+                        } else {
+                            self.position.x = (self.position.x - 1) % width;
+                        }
+                    }
+                    Direction::East | Direction::SouthEast | Direction::NorthEast => {
+                        self.position.x = (self.position.x + 1) % width;
+                    }
+                    Direction::North | Direction::South => {}
                 }
             }
-            Direction::South | Direction::SouthEast | Direction::SouthWest => {
-                self.position.y = (self.position.y + 1) % height;
-            }
-            Direction::East | Direction::West => {}
-        }
-        match self.position.orientation {
-            Direction::West | Direction::NorthWest | Direction::SouthWest => {
-                if self.position.x == 0 {
-                    self.position.x = width - 1;
-                } else {
-                    self.position.x = (self.position.x - 1) % width;
+            GridType::Hexagonal => {}
+            GridType::Triangular => {
+                match (
+                    effective_direction(grid_type, direction),
+                    self.position.orientation,
+                ) {
+                    (Direction::South, Direction::SouthWest)
+                    | (Direction::East, Direction::North)
+                    | (Direction::West, Direction::SouthEast) => {
+                        self.position.orientation = Direction::NorthEast;
+                        self.position.x = (self.position.x + 1) % width;
+                    }
+                    (Direction::South, Direction::North)
+                    | (Direction::East, Direction::SouthEast)
+                    | (Direction::West, Direction::SouthWest) => {
+                        self.position.orientation = Direction::South;
+                        self.position.y = (self.position.y + 1) % height;
+                    }
+                    (Direction::South, Direction::NorthEast)
+                    | (Direction::East, Direction::South)
+                    | (Direction::West, Direction::NorthWest) => {
+                        self.position.orientation = Direction::SouthWest;
+                        if self.position.x == 0 {
+                            self.position.x = width - 1;
+                        } else {
+                            self.position.x = (self.position.x - 1) % width;
+                        }
+                    }
+                    (Direction::South, Direction::SouthEast)
+                    | (Direction::East, Direction::SouthWest)
+                    | (Direction::West, Direction::North) => {
+                        self.position.orientation = Direction::NorthWest;
+                        if self.position.x == 0 {
+                            self.position.x = width - 1;
+                        } else {
+                            self.position.x = (self.position.x - 1) % width;
+                        }
+                    }
+                    (Direction::South, Direction::South)
+                    | (Direction::East, Direction::NorthWest)
+                    | (Direction::West, Direction::NorthEast) => {
+                        self.position.orientation = Direction::North;
+                        if self.position.y == 0 {
+                            self.position.y = height - 1;
+                        } else {
+                            self.position.y -= 1;
+                        }
+                    }
+                    (Direction::South, Direction::NorthWest)
+                    | (Direction::East, Direction::NorthEast)
+                    | (Direction::West, Direction::South) => {
+                        self.position.orientation = Direction::SouthEast;
+                        self.position.x = (self.position.x + 1) % width;
+                    }
+                    (_, Direction::West) | (_, Direction::East) => {}
+                    _ => unreachable!(),
                 }
             }
-            Direction::East | Direction::SouthEast | Direction::NorthEast => {
-                self.position.x = (self.position.x + 1) % width;
-            }
-            Direction::North | Direction::South => {}
         }
     }
 }
@@ -198,7 +268,7 @@ impl Default for Ant {
         let position = Position {
             x: x0,
             y: y0,
-            orientation: Direction::West,
+            orientation: Direction::North,
         };
 
         Self {
@@ -216,6 +286,7 @@ pub struct State {
     pub ants: Vec<Ant>,
     field: Field,
     pub instructions: Vec<Instruction>,
+    pub grid_type: GridType,
 }
 
 impl Default for State {
@@ -226,6 +297,7 @@ impl Default for State {
             ants: vec![Ant::default()],
             field: Field::default(),
             instructions: vec![Instruction::default()],
+            grid_type: GridType::SquareDiagonal,
         }
     }
 }
@@ -269,7 +341,12 @@ impl State {
                     [&self.field.values[ant.position.x][ant.position.y]];
                 self.field.values[ant.position.x][ant.position.y] = next.0;
                 if let Some(direction) = next.1 {
-                    ant.travel(direction, self.field.width, self.field.height);
+                    ant.travel(
+                        self.grid_type,
+                        direction,
+                        self.field.width,
+                        self.field.height,
+                    );
                 }
             }
         }
@@ -305,7 +382,7 @@ impl State {
         let position = Position {
             x,
             y,
-            orientation: Direction::West,
+            orientation: Direction::North,
         };
         self.ants.push(Ant {
             start_position: position.clone(),
@@ -357,5 +434,92 @@ impl State {
                 (ant.start_position.y as f64 / self.field.height as f64 * height as f64) as usize;
         }
         self.field.height = height;
+    }
+}
+
+pub fn prev_direction(grid_type: GridType, original: Option<Direction>) -> Option<Direction> {
+    match grid_type {
+        GridType::SquareDiagonal => match original {
+            None => Some(Direction::NorthWest),
+            Some(Direction::North) => None,
+            Some(direction) => Some(direction + Direction::NorthWest),
+        },
+        GridType::Square => match original {
+            Some(Direction::North) => None,
+            Some(direction) => Some(direction + Direction::West),
+            None => Some(Direction::West),
+        },
+        GridType::Hexagonal => match original {
+            Some(Direction::North) => None,
+            Some(Direction::NorthWest) => Some(Direction::SouthWest),
+            Some(Direction::SouthEast) => Some(Direction::NorthEast),
+            Some(direction) => Some(direction + Direction::NorthWest),
+            None => Some(Direction::NorthWest),
+        },
+        GridType::Triangular => match original {
+            None => Some(Direction::West),
+            Some(Direction::West) => Some(Direction::South),
+            Some(Direction::South) => Some(Direction::East),
+            _ => None,
+        },
+    }
+}
+
+pub fn next_direction(grid_type: GridType, original: Option<Direction>) -> Option<Direction> {
+    match grid_type {
+        GridType::SquareDiagonal => match original {
+            Some(Direction::NorthWest) => None,
+            Some(direction) => Some(direction + Direction::NorthEast),
+            None => Some(Direction::North),
+        },
+        GridType::Square => match original {
+            Some(Direction::West) => None,
+            Some(direction) => Some(direction + Direction::East),
+            None => Some(Direction::North),
+        },
+        GridType::Hexagonal => match original {
+            Some(Direction::NorthWest) => None,
+            Some(Direction::SouthWest) => Some(Direction::NorthWest),
+            Some(Direction::NorthEast) => Some(Direction::SouthEast),
+            Some(direction) => Some(direction + Direction::NorthEast),
+            None => Some(Direction::North),
+        },
+        GridType::Triangular => match original {
+            None => Some(Direction::East),
+            Some(Direction::East) => Some(Direction::South),
+            Some(Direction::South) => Some(Direction::West),
+            _ => None,
+        },
+    }
+}
+
+pub fn next_grid_type(grid_type: GridType) -> GridType {
+    match grid_type {
+        GridType::Square => GridType::SquareDiagonal,
+        GridType::SquareDiagonal => GridType::Hexagonal,
+        GridType::Hexagonal => GridType::Triangular,
+        GridType::Triangular => GridType::Square,
+    }
+}
+
+pub fn effective_direction(grid_type: GridType, direction: Direction) -> Direction {
+    match grid_type {
+        GridType::SquareDiagonal => direction,
+        GridType::Square => match direction {
+            Direction::NorthEast | Direction::SouthEast => Direction::East,
+            Direction::SouthWest | Direction::NorthWest => Direction::West,
+            direction => direction,
+        },
+        GridType::Hexagonal => match direction {
+            Direction::West => Direction::NorthWest,
+            Direction::East => Direction::NorthEast,
+            direction => direction,
+        },
+        GridType::Triangular => match direction {
+            Direction::North => Direction::South,
+            Direction::NorthEast | Direction::SouthEast => Direction::East,
+            Direction::SouthWest | Direction::NorthWest => Direction::West,
+            direction => direction,
+        },
     }
 }
