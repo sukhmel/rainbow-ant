@@ -154,7 +154,7 @@ impl canvas::Program<Message> for App {
                             color,
                         );
                     }
-                    GridType::Hexagonal => {}
+                    GridType::Hexagonal => frame.fill(&hexagon_path(scale, x, y, 0.0), color),
                     GridType::Triangular => frame.fill(&triangle_path(scale, x, y, 0.0), color),
                 }
             }
@@ -166,8 +166,12 @@ impl canvas::Program<Message> for App {
                 && y <= height
             {
                 match self.state.grid_type {
-                    GridType::Triangular => {
-                        let target = triangle_path(scale, x, y, 0.0);
+                    GridType::Triangular | GridType::Hexagonal => {
+                        let target = if self.state.grid_type == GridType::Triangular {
+                            triangle_path(scale, x, y, 0.0)
+                        } else {
+                            hexagon_path(scale, x, y, 0.0)
+                        };
                         frame.stroke(
                             &target,
                             Stroke {
@@ -190,7 +194,6 @@ impl canvas::Program<Message> for App {
                             line_dash: Default::default(),
                         },
                     ),
-                    _ => {}
                 }
                 frame.fill_text(canvas::Text {
                     content: format!("({x:.0}, {y:.0})"),
@@ -220,17 +223,23 @@ impl canvas::Program<Message> for App {
                         line_dash: Default::default(),
                     },
                 ),
-                GridType::Hexagonal => {}
-                GridType::Triangular => frame.stroke(
-                    &triangle_path(scale, x, y, 1.0),
-                    Stroke {
-                        style: canvas::Style::Solid(self.ant_color),
-                        width: 2.0,
-                        line_cap: Default::default(),
-                        line_join: Default::default(),
-                        line_dash: Default::default(),
-                    },
-                ),
+                GridType::Triangular | GridType::Hexagonal => {
+                    let target = if self.state.grid_type == GridType::Triangular {
+                        triangle_path(scale, x, y, 1.0)
+                    } else {
+                        hexagon_path(scale, x, y, 1.0)
+                    };
+                    frame.stroke(
+                        &target,
+                        Stroke {
+                            style: canvas::Style::Solid(self.ant_color),
+                            width: 2.0,
+                            line_cap: Default::default(),
+                            line_join: Default::default(),
+                            line_dash: Default::default(),
+                        },
+                    )
+                }
             }
         }
 
@@ -1056,7 +1065,12 @@ impl App {
                 Some(((point.x / scale) as usize, (point.y / scale) as usize))
             }
             // TODO
-            GridType::Hexagonal => Some(((point.x / scale) as usize, (point.y / scale) as usize)),
+            GridType::Hexagonal => {
+                // TODO: the discrepancy increases with absolute value, and also it needs to check PIP
+                let y = (point.y * 2.0 / scale) as usize;
+                let x = (point.x / 1.5 / scale) as usize;
+                Some((x, y))
+            }
             GridType::Triangular => {
                 let y = (point.y * 2.0 / scale / f32::sqrt(3.0)) as usize;
                 let x = (point.x / scale) as usize * 2;
@@ -1119,6 +1133,33 @@ where
         })
     ]
     .into()
+}
+
+fn hexagon_path(scale: f32, x: usize, y: usize, padding: f32) -> Path {
+    Path::new(|builder| {
+        let shift = if y % 2 == 0 { 0.0 } else { scale * 3.0 / 4.0 };
+        let x = shift + x as f32 * 1.5 * scale;
+        let y = (y + 1) as f32 * f32::sqrt(3.0) * scale / 4.0;
+        builder.move_to(Point::new(x + padding, y));
+        builder.line_to(Point::new(
+            x + scale / 4.0 + padding,
+            y - f32::sqrt(3.0) * scale / 4.0 + padding,
+        ));
+        builder.line_to(Point::new(
+            x + 3.0 * scale / 4.0 - padding,
+            y - f32::sqrt(3.0) * scale / 4.0 + padding,
+        ));
+        builder.line_to(Point::new(x + scale - padding, y));
+        builder.line_to(Point::new(
+            x + 3.0 * scale / 4.0 - padding,
+            y + f32::sqrt(3.0) * scale / 4.0 - padding,
+        ));
+        builder.line_to(Point::new(
+            x + scale / 4.0 + padding,
+            y + f32::sqrt(3.0) * scale / 4.0 - padding,
+        ));
+        builder.close();
+    })
 }
 
 fn triangle_path(scale: f32, x: usize, y: usize, padding: f32) -> Path {
