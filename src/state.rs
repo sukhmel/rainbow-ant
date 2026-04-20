@@ -127,6 +127,31 @@ impl From<u8> for Direction {
     }
 }
 
+impl Direction {
+    fn to_hexagon_u8(&self) -> u8 {
+        match self {
+            Direction::North => 0,
+            Direction::NorthEast | Direction::East => 1,
+            Direction::SouthEast => 2,
+            Direction::South => 3,
+            Direction::SouthWest | Direction::West => 4,
+            Direction::NorthWest => 5,
+        }
+    }
+
+    fn from_hexagon_u8(value: u8) -> Direction {
+        match value % 6 {
+            0 => Direction::North,
+            1 => Direction::NorthEast,
+            2 => Direction::SouthEast,
+            3 => Direction::South,
+            4 => Direction::SouthWest,
+            5 => Direction::NorthWest,
+            _ => unreachable!(),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Instruction {
     /// Map from current palette index to next palette index and direction
@@ -199,7 +224,49 @@ impl Ant {
                     Direction::North | Direction::South => {}
                 }
             }
-            GridType::Hexagonal => {}
+            GridType::Hexagonal => {
+                let current = self.position.orientation.to_hexagon_u8();
+                let direction = effective_direction(grid_type, direction).to_hexagon_u8();
+                let next = (current + direction) % 6;
+                self.position.orientation = Direction::from_hexagon_u8(next);
+                println!("current = {:?}, direction = {:?}, next = {:?}, orientation={:?}", current, direction, next, self.position.orientation);
+                match self.position.orientation {
+                    Direction::North => {
+                        if self.position.y == 0 {
+                            self.position.y = height - 1;
+                        } else {
+                            self.position.y -= 1;
+                        }
+                    },
+                    Direction::NorthEast | Direction::NorthWest if self.position.x % 2 == 0  => {
+                        if self.position.y == 0 {
+                            self.position.y = height - 1;
+                        } else {
+                            self.position.y -= 1;
+                        }
+                    }
+                    Direction::South => {
+                        self.position.y = (self.position.y + 1) % height;
+                    }
+                    Direction::SouthEast | Direction::SouthWest if self.position.x % 2 != 0 => {
+                        self.position.y = (self.position.y + 1) % height;
+                    }
+                    _ => {}
+                }
+                match self.position.orientation {
+                    Direction::NorthWest | Direction::SouthWest => {
+                        if self.position.x == 0 {
+                            self.position.x = width - 1;
+                        } else {
+                            self.position.x -= 1;
+                        }
+                    },
+                    Direction::SouthEast | Direction::NorthEast => {
+                        self.position.x = (self.position.x + 1) % width;
+                    }
+                    _ => {}
+                }
+            }
             GridType::Triangular => {
                 match (
                     effective_direction(grid_type, direction),

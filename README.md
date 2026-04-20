@@ -19,9 +19,9 @@ TODO:
 - [x] Zoom in/out ([viewport](https://docs.rs/iced_glow/latest/iced_glow/struct.Viewport.html) 
     with [canvas](https://docs.rs/iced/latest/iced/widget/canvas/index.html)?)
 - [x] Grid resize
-- [ ] Support for hexagonal grid
-  - [ ] display grid
-  - [ ] move set
+- [x] Support for hexagonal grid
+  - [x] display grid
+  - [x] move set
 - [ ] Support for triangular grid
   - [x] display grid
   - [x] move set
@@ -30,3 +30,8 @@ TODO:
 - [ ] Save/load state
 - [ ] Undo/redo
 - [x] Set a specific step number
+
+Nice to have:
+- [ ] Optimize drawing speed
+- [ ] Refactor to split specific parts of the UI onto separate files, and separate moveset logic.
+- [ ] Autofill new palette entries

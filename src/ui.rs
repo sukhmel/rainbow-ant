@@ -809,6 +809,8 @@ impl App {
                     ..
                 }) => {
                     self.state.reset();
+                    self.settings.paused = true;
+                    self.update_join_handle.take();
                 }
                 Event::Keyboard(keyboard::Event::KeyPressed {
                     physical_key: key::Physical::Code(key::Code::KeyG),
@@ -1026,6 +1028,7 @@ impl App {
             Message::SkipForward => {
                 self.state
                     .go_to_step((self.state.generation() / 100_000 + 1) * 100_000);
+                self.defer_update(|state| state.recalculate());
                 self.step_requested = None;
             }
         }
@@ -1067,8 +1070,8 @@ impl App {
             // TODO
             GridType::Hexagonal => {
                 // TODO: the discrepancy increases with absolute value, and also it needs to check PIP
-                let y = (point.y * 2.0 / scale) as usize;
-                let x = (point.x / 1.5 / scale) as usize;
+                let y = (2.0 * point.y / f32::sqrt(3.0) / scale) as usize;
+                let x = (4.0 * point.x / 3.0 / scale) as usize;
                 Some((x, y))
             }
             GridType::Triangular => {
@@ -1137,9 +1140,9 @@ where
 
 fn hexagon_path(scale: f32, x: usize, y: usize, padding: f32) -> Path {
     Path::new(|builder| {
-        let shift = if y % 2 == 0 { 0.0 } else { scale * 3.0 / 4.0 };
-        let x = shift + x as f32 * 1.5 * scale;
-        let y = (y + 1) as f32 * f32::sqrt(3.0) * scale / 4.0;
+        let shift = scale * f32::sqrt(3.0) / 4.0 * if x % 2 == 0 { 1.0 } else { 2.0 };
+        let x = x as f32 * 3.0 * scale / 4.0;
+        let y = y as f32 * f32::sqrt(3.0) * scale / 2.0 + shift;
         builder.move_to(Point::new(x + padding, y));
         builder.line_to(Point::new(
             x + scale / 4.0 + padding,
